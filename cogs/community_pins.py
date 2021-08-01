@@ -3,16 +3,8 @@ import discord
 import logging
 from discord.ext import commands
 from cheesyutils.discord_bots import DiscordBot, Embed
-from cheesyutils.discord_bots.bot import Context
 from enum import Enum
 from typing import List, Optional, Union
-
-
-logger = logging.getLogger("reactions")
-logger.setLevel(logging.DEBUG)
-handler = logging.FileHandler(filename="DungeonWhisperer.log", encoding="utf-8", mode="a")
-handler.setFormatter(logging.Formatter("%(asctime)s: [%(levelname)s]: (%(name)s)): %(message)s"))
-logger.addHandler(handler)
 
 
 class ReactionEmoji(Enum):
@@ -36,6 +28,12 @@ class CommunityPins(commands.Cog):
 
     def __init__(self, bot: DiscordBot):
         self.bot = bot
+
+        self.logger = logging.getLogger("reactions")
+        self.logger.setLevel(logging.DEBUG)
+        handler = logging.FileHandler(filename="DungeonWhisperer.log", encoding="utf-8", mode="a")
+        handler.setFormatter(logging.Formatter("%(asctime)s: [%(levelname)s]: (%(name)s)): %(message)s"))
+        self.logger.addHandler(handler)
     
     async def force_react(self, message: discord.Message, emoji: ReactionEmoji) -> bool:
         """Forces a reaction onto a message, assuming the bot has the proper permissions to do so
@@ -59,7 +57,7 @@ class CommunityPins(commands.Cog):
         `True` if the reaction was successfully added, `False` otherwise
         """
 
-        logger.debug(f"Forcing reaction {str(emoji)!r} onto message {message.id} from guild {message.guild.id} in channel {message.channel.id}")
+        self.logger.debug(f"Forcing reaction {str(emoji)!r} onto message {message.id} from guild {message.guild.id} in channel {message.channel.id}")
         reactions = message.reactions
         if len(reactions) == 20:
             # we're gonna have to force the reaction
@@ -177,6 +175,7 @@ class CommunityPins(commands.Cog):
                                 marked = await self.force_react(message, ReactionEmoji.QUEUED.value)
 
                                 if marked:
+                                    self.logger.debug(f"Message {message.jump_url} was queued for pin review")
                                     await channel.send(
                                         message.jump_url,
                                         embed=Embed(

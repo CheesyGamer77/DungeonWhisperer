@@ -3,23 +3,15 @@ import datetime
 import json
 import logging
 import random
-from discord import guild
 import spotipy
 import os
 from cheesyutils.discord_bots import DiscordBot, Context, Embed
 from cheesyutils.discord_bots.checks import is_guild_moderator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from discord.ext import commands
 from io import StringIO
 from spotipy.oauth2 import SpotifyClientCredentials
-from typing import Optional, Union, List
-
-
-logger = logging.getLogger("music")
-logger.setLevel(logging.DEBUG)
-handler = logging.FileHandler(filename="DungeonWhisperer.log", encoding="utf-8", mode="a")
-handler.setFormatter(logging.Formatter("%(asctime)s: [%(levelname)s]: (%(name)s)): %(message)s"))
-logger.addHandler(handler)
+from typing import List, Optional
 
 
 @dataclass
@@ -71,8 +63,11 @@ class Music(commands.Cog):
     def __init__(self, bot: DiscordBot):
         self.bot = bot
 
-    async def cog_check(self, ctx: Context):
-        return super().cog_check(ctx)
+        self.logger = logging.getLogger("music")
+        self.logger.setLevel(logging.DEBUG)
+        handler = logging.FileHandler(filename="DungeonWhisperer.log", encoding="utf-8", mode="a")
+        handler.setFormatter(logging.Formatter("%(asctime)s: [%(levelname)s]: (%(name)s)): %(message)s"))
+        self.logger.addHandler(handler)
 
     def _get_spotify_credentials_manager(self, fp: str="spotify_credentials.json") -> SpotifyClientCredentials:
         data = json.load(open(fp, "r"))
@@ -148,13 +143,13 @@ class Music(commands.Cog):
         return "Not set"
 
     def get_track_audio_source(self, root: str, name: str) -> discord.FFmpegPCMAudio:
-        logger.debug("Searching in %s for track named %s", root, name)
+        self.logger.debug("Searching in %s for track named %s", root, name)
         for item in os.listdir(root):
             # audio tracks typically have a track number prepended to the file name
             # this is formatted as `xx_...`
             # this also strips out the `.mp3` file extension
             item_name = item[3:][:-4]
-            logger.debug(f"Found item named {item_name!r}")
+            # self.logger.debug(f"Found item named {item_name!r}")
 
             if item_name == name:
                 return discord.FFmpegPCMAudio(f"{root}/{item}")
@@ -183,7 +178,7 @@ class Music(commands.Cog):
 
         track: dict = random.choice(album["tracks"]["items"])
         track_name = track["name"]
-        logger.debug("Randomly chose track %s from path %s", f"\"{track_name}\"", f"{root}/{path}")
+        self.logger.debug("Randomly chose track %s from path %s", f"\"{track_name}\"", f"{root}/{path}")
 
         return MusicTrackProxy(
             title=track["name"],

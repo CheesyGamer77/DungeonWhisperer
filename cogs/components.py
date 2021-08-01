@@ -9,14 +9,6 @@ from discord.ext import commands
 from enum import Enum
 from typing import Callable, Generator, List, Optional, Union
 
-
-logger = logging.getLogger("components")
-logger.setLevel(logging.DEBUG)
-handler = logging.FileHandler(filename="DungeonWhisperer.log", encoding="utf-8", mode="a")
-handler.setFormatter(logging.Formatter("%(asctime)s: [%(levelname)s]: (%(name)s): %(message)s"))
-logger.addHandler(handler)
-
-
 class ComponentType(Enum):
     # yes, dislash has a class for this, but the author
     # doesn't seem to know that enums are a thing, and because
@@ -80,7 +72,8 @@ class RoleGroup:
                     if role:
                         roles.append(role)
                 except KeyError:
-                    logger.error("Could not retrieve role id for role group %s of guild %s. Did the database schema change?", name, guild.id)
+                    # logger.error("Could not retrieve role id for role group %s of guild %s. Did the database schema change?", name, guild.id)
+                    pass
 
             return cls(name, roles)
         
@@ -119,7 +112,8 @@ class RoleGroup:
                     if role:
                         roles.append(role)
                 except KeyError:
-                    logger.error("Could not retrieve role id for role group %s of guild %s. Did the database schema change?", argument, ctx.guild.id)
+                    # logger.error("Could not retrieve role id for role group %s of guild %s. Did the database schema change?", argument, ctx.guild.id)
+                    pass
 
             return cls(argument, roles)
         
@@ -195,6 +189,12 @@ class Components(commands.Cog):
 
     def __init__(self, bot: DiscordBot):
         self.bot = bot
+
+        self.logger = logging.getLogger("components")
+        self.logger.setLevel(logging.DEBUG)
+        handler = logging.FileHandler(filename="DungeonWhisperer.log", encoding="utf-8", mode="a")
+        handler.setFormatter(logging.Formatter("%(asctime)s: [%(levelname)s]: (%(name)s): %(message)s"))
+        self.logger.addHandler(handler)
 
     def walk_components(self, components: List[Component]) -> Generator[Component, None, None]:
         """A generator yielding each component from a list of components.
@@ -297,7 +297,7 @@ class Components(commands.Cog):
             parameters=(interaction.guild.id, interaction.channel.id, interaction.message.id, interaction.component.custom_id)
         )
 
-        logger.debug(
+        self.logger.debug(
             "Received menu interaction on menu %s from guild %s, channel %s, message %s",
             interaction.component.custom_id, interaction.guild.id, interaction.channel.id, interaction.message.id
         )
@@ -305,7 +305,7 @@ class Components(commands.Cog):
         for selected_option in interaction.component.selected_options:
             # extract any on_select actions for the option
             actions: List[dict] = [json.loads((row)["action"]) for row in rows if MenuEvent(row["event"]) is MenuEvent.on_select and row["label"] == selected_option.label]
-            logger.debug("Found %s actions to execute on select for label %s", len(actions), selected_option.label)
+            self.logger.debug("Found %s actions to execute on select for label %s", len(actions), selected_option.label)
 
             # iterate through each of the selected options
             # execute any on_event actions, if required
@@ -316,13 +316,13 @@ class Components(commands.Cog):
                     # check if the member doesn't already has the role
                     role_id = select_action["role_id"]
                     if not (role_id in [role.id for role in interaction.author.roles]):
-                        logger.debug("Adding role %s to user %s", role_id, interaction.author.id)
+                        self.logger.debug("Adding role %s to user %s", role_id, interaction.author.id)
                         await interaction.author.add_roles(discord.Object(role_id))
                 elif action_type is ComponentAction.remove_role:
                     # check if the member currently has the role
                     role_id = select_action["role_id"]
                     if role_id in [role.id for role in interaction.author.roles]:
-                        logger.debug("Removing role %s from user %s", role_id, interaction.author.id)
+                        self.logger.debug("Removing role %s from user %s", role_id, interaction.author.id)
                         await interaction.author.remove_roles(discord.Object(role_id))
 
                 elif action_type is ComponentAction.send_message:
@@ -336,10 +336,10 @@ class Components(commands.Cog):
 
                     # we first fetch the group
                     try:
-                        logger.debug("Fetching role group %s from guild %s", select_action["group_name"], interaction.guild.id)
+                        self.logger.debug("Fetching role group %s from guild %s", select_action["group_name"], interaction.guild.id)
                         role_group = await RoleGroup.fetch(self.bot, interaction.guild, select_action["group_name"])
                     except RoleGroupNotFound:
-                        logger.error(
+                        self.logger.error(
                             "Failed to fetch role group %s for guild %s",
                             select_action["group_name"], interaction.guild.id
                         )
@@ -352,7 +352,7 @@ class Components(commands.Cog):
                             if role.id in current_role_ids:
                                 grouped_roles.append(role)
                         
-                        logger.debug("Removing %s roles from user %s", len(grouped_roles), interaction.author.id)
+                        self.logger.debug("Removing %s roles from user %s", len(grouped_roles), interaction.author.id)
                         await interaction.author.remove_roles(*grouped_roles)
 
     @commands.guild_only()
