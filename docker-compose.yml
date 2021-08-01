@@ -1,0 +1,6 @@
+version: "3.9"
+services:
+    dungeonwhisperer:
+        build: .
+        volumes:
+            - ./:/usr/src/bot
