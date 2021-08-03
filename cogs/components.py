@@ -1,4 +1,4 @@
-import asyncio
+from cheesyutils.discord_bots.errors import PromptTimedout
 from dislash import ActionRow, Button, Component, MessageInteraction, SelectMenu, SelectOption
 import discord
 import io
@@ -425,33 +425,26 @@ class Components(commands.Cog):
         def check(msg: discord.Message) -> bool:
             return msg.author.id == ctx.author.id and msg.channel.id == ctx.channel.id and msg.content
 
-        # prompt label
         timeout = 30
+
+        # prompt label
         try:
-            await ctx.send("Input the label to use for the option")
-            m: discord.Message = await self.bot.wait_for("message", check=check, timeout=timeout)
-            label = m.content
-        except asyncio.TimeoutError:
-            return await ctx.reply_fail(f"Timed out after {timeout} seconds, try again")
+            label = await ctx.prompt_string(Embed(description="Input the label to use for the option"), timeout=timeout)
+        except PromptTimedout as e:
+            return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
         
         # prompt value
-        timeout = 30
         try:
-            await ctx.send("Input the value to use for the option")
-            m: discord.Message = await self.bot.wait_for("message", check=check, timeout=timeout)
-            value = m.content
-        except asyncio.TimeoutError:
-            return await ctx.reply_fail(f"Timed out after {timeout} seconds, try again")
+            value = await ctx.prompt_string(Embed(description="Input the value to use for the option"), timeout=timeout)
+        except PromptTimedout as e:
+            return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
 
         # prompt description
         timeout = 45
         try:
-            await ctx.send("Input the description to use for the option")
-            m: discord.Message = await self.bot.wait_for("message", check=check, timeout=timeout)
-            description = m.content
-        except asyncio.TimeoutError:
-            return await ctx.reply_fail(f"Timed out after {timeout} seconds, try again")
-
+            description = await ctx.prompt_string(Embed(description="Input the description to use for the option"), timeout=timeout)
+        except PromptTimedout as e:
+            return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
 
         def setter(menu: SelectMenu) -> SelectMenu:
             menu.options.append(
@@ -526,40 +519,33 @@ class Components(commands.Cog):
             # prompt for the role
             
             while True:
-                timeout = 30
                 try:
-                    await ctx.send("Input the name, ID, or mention of the role you want to set")
-                    m: discord.Message = await self.bot.wait_for("message", check=check, timeout=timeout)
-                    role: discord.Role = await commands.RoleConverter().convert(ctx, m.content)
+                    arg = await ctx.prompt_string(Embed(description="Input the name, ID, or mention of the role you want to set"), timeout=30)
+                    role: discord.Role = await commands.RoleConverter().convert(ctx, arg)
                     data["role_id"] = role.id
                     break
-                except asyncio.TimeoutError:
-                    return await ctx.reply_fail(f"Timed out after {timeout} seconds, try again")
+                except PromptTimedout as e:
+                    return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
                 except commands.RoleNotFound:
-                    await ctx.reply_fail(f"Could not convert `{m.content}` into a valid role, try again")
+                    await ctx.reply_fail(f"Could not convert `{arg}` into a valid role, try again")
         elif action is ComponentAction.remove_role_group:
             # prompt for role group name
             while True:
-                timeout = 30
                 try:
-                    await ctx.send("Input the name of the role group you wish to remove")
-                    m: discord.Message = await self.bot.wait_for("message", check=check, timeout=timeout)
-                    group: RoleGroup = await RoleGroup.convert(ctx, m.content)
+                    arg = await ctx.prompt_string(Embed(description="Input the name of the role group you wish to remove"), timeout=30)
+                    group: RoleGroup = await RoleGroup.convert(ctx, arg)
                     data["group_name"] = group.name
                     break
-                except asyncio.TimeoutError:
-                    return await ctx.reply_fail(f"Timed out after {timeout} seconds, try again")
+                except PromptTimedout as e:
+                    return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
                 except RoleGroupNotFound:
-                    await ctx.reply_fail(f"Could not convert {m.content} into a valid role group, try again")
+                    await ctx.reply_fail(f"Could not convert {arg} into a valid role group, try again")
         elif action is ComponentAction.send_followup:
             # prompt followup message content
-            timeout = 30
             try:
-                await ctx.send("Input the follow up message to send")
-                m: discord.Message = await self.bot.wait_for("message", check=check, timeout=timeout)
-                data["message"] = m.content
-            except asyncio.TimeoutError:
-                return await ctx.reply_fail(f"Timed out after {timeout} seconds, try again")
+                data["message"] = await ctx.prompt_string(Embed(description="Input the follow up message to send"), timeout=30)
+            except PromptTimedout as e:
+                return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
 
         # fetch the menu and its respective option
         # this is so jank it's not even funny
@@ -615,12 +601,9 @@ class Components(commands.Cog):
             return msg.author.id == ctx.author.id and msg.channel.id == ctx.channel.id and msg.content
 
         try:
-            timeout = 45
-            await ctx.send("Input the description to use for the option")
-            m: discord.Message = await self.bot.wait_for("message", check=check, timeout=timeout)
-            description = m.content
-        except asyncio.TimeoutError:
-            return await ctx.reply_fail(f"Timed out after {timeout} seconds, try again")
+            description = await ctx.prompt_string(Embed(description="Input the description to use for the option"), timeout=45)
+        except PromptTimedout as e:
+            return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
 
         # edit menu
         components = await self.fetch_all_components(message)
@@ -656,12 +639,9 @@ class Components(commands.Cog):
             return msg.author.id == ctx.author.id and msg.channel.id == ctx.channel.id and msg.content
 
         try:
-            timeout = 45
-            await ctx.send("Input the label to use for the option")
-            m: discord.Message = await self.bot.wait_for("message", check=check, timeout=timeout)
-            new_label = m.content
-        except asyncio.TimeoutError:
-            return await ctx.reply_fail(f"Timed out after {timeout} seconds, try again")
+            new_label = await ctx.prompt_string(Embed(description="Input the label to use for the option"), timeout=45)
+        except PromptTimedout as e:
+            return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
 
         # edit menu
         components = await self.fetch_all_components(message)
