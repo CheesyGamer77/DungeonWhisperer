@@ -5,7 +5,7 @@ from dislash import SlashClient
 
 COLOR = get_discord_color("#1fcdff")
 
-bot = DiscordBot(";", members_intent=True, color=COLOR, status="idle", activity="in the Dungeon Depths", database="DungeonWhisperer.db", help_command=ModOnlyHelpCommand(COLOR))
+bot = DiscordBot("$", members_intent=True, color=COLOR, status="idle", activity="in the Dungeon Depths", database="DungeonWhisperer.db", help_command=ModOnlyHelpCommand(COLOR))
 SlashClient(bot)
 
 bot.load_extension("cogs.community_pins")
