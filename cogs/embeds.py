@@ -1,13 +1,26 @@
-from re import L
 import discord
-from discord import file
+import logging
+from dataclasses import dataclass, field
+from discord import message
 from discord.ext import commands
 from cheesyutils.discord_bots import DiscordBot, Context, Embed
 from cheesyutils.discord_bots.checks import is_guild_moderator
 import json
 from io import StringIO
-from typing import Any, List, Optional
+from typing import Any, Generator, List, Optional
 
+
+@dataclass
+class MessageDataProxy:
+    """
+    A proxy class mostly for making our upload command easier to deal with
+
+    In some cases, discohook provides multiple syntaxes for storing message data, so this helps us
+    deal with both when using the upload command
+    """
+    
+    content: Optional[str] = field(default=None)
+    embed: Optional[Embed] = field(default=None)
 
 class Embeds(commands.Cog):
     """
@@ -16,6 +29,12 @@ class Embeds(commands.Cog):
 
     def __init__(self, bot: DiscordBot):
         self.bot = bot
+
+        self.logger = logging.getLogger("embeds")
+        self.logger.setLevel(logging.DEBUG)
+        handler = logging.FileHandler(filename="DungeonWhisperer.log", encoding="utf-8", mode="a")
+        handler.setFormatter(logging.Formatter("%(asctime)s: [%(levelname)s]: (%(name)s): %(message)s"))
+        self.logger.addHandler(handler)
 
     def __remove_all_dict_keys_except(self, d: dict, key: Any) -> dict:
         # no, you cannot just iterate over each dict key and delete it on the fly
@@ -78,7 +97,11 @@ class Embeds(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @commands.command(name="upload")
-    async def upload_command(self, ctx: Context, text_channel: Optional[discord.TextChannel]):
+    async def upload_command(
+        self,
+        ctx: Context,
+        text_channel: Optional[discord.TextChannel]
+    ):
         """
         Sends an embed into a particular channel, given an attached JSON file
         """
@@ -89,19 +112,38 @@ class Embeds(commands.Cog):
         msg: discord.Message = ctx.message
         if msg.attachments and msg.attachments[0].filename.endswith(".json"):
             # try to read the json file
-            # TODO: Discohook sometimes produces a different syntax
-
             document = msg.attachments[0]
 
             try:
                 data: bytes = await document.read()
-                data = json.loads(data.decode("utf-8"))
+                data: dict = json.loads(data.decode("utf-8"))
             except discord.HTTPException as e:
                 await ctx.reply_fail(f"Couldn't read attachment data: {e.__class__.__name__}")
             except json.JSONDecodeError as e:
                 await ctx.reply_fail(f"Failed to decode JSON in attachment at line {e.lineno}")
             else:
-                try:
+                # check which syntax is being used
+                keys = data.keys()
+                if "version" in keys and "backups" in keys and isinstance(data["backups"], list):
+                    # this is probably discohook's alternative syntax
+                    self.logger.debug(f"Using discohook backup syntax for upload command message {ctx.message.jump_url}")
+
+                    # NOTE: We only look at the first backup
+                    for message in data["backups"][0]["messages"]:
+                        message = message["data"]
+                        for i, embed_json in enumerate(message["embeds"]):
+                            embed_json["type"] = "rich"
+                            await text_channel.send(
+                                message["content"] if i == 0 else None,
+                                embed=Embed.from_dict(embed_json)
+                            )
+                    
+                    await ctx.reply_success(f"Embed(s) sent in {text_channel.mention}")
+
+                elif "content" in keys and "embeds" in keys and isinstance(data["embeds"], list):
+                    # this is most likely the standard format discord expects
+                    self.logger.debug(f"Using standard syntax for upload command message {ctx.message.jump_url}")
+                    
                     for i, embed_json in enumerate(data["embeds"]):
                         embed_json["type"] = "rich"
 
@@ -109,10 +151,11 @@ class Embeds(commands.Cog):
                             data["content"] if i == 0 else None,
                             embed=Embed.from_dict(embed_json)
                         )
-                except discord.Forbidden:
-                    await ctx.reply_fail(f"Missing permissions in {text_channel.mention}")
+                    
+                    await ctx.reply_success(f"Embed(s) sent in {text_channel.mention}")
                 else:
-                    await ctx.reply_success(f"Embed(s) posted in {text_channel.mention}")
+                    self.logger.error(f"Undefined schema for upload command message {ctx.message.jump_url} with root keys {keys}")
+                    await ctx.reply_fail("Invalid JSON schema provided")
         else:
             await ctx.reply_fail("Missing JSON file attachment to post")
     
