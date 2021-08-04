@@ -81,6 +81,19 @@ class Config(commands.Cog):
             )
         )
 
+    @is_guild_moderator()
+    @config_group.command(name="get")
+    async def config_get_command(self, ctx: Context, key: ConfigKey):
+        """
+        Returns the value set for a particular setting
+        """
+
+        row = await self.bot.database.query_first(f"SELECT {key.name} FROM config WHERE server_id = ?", parameters=(ctx.guild.id,))
+        if row:
+            row = dict(row)
+            await ctx.send(f"`{key.name}` is currently set to `{row[key.name]}` ({key.get_expected_type().__name__})")
+        else:
+            await ctx.reply_fail("Missing configuration. Contact bot owner.")
 
 def setup(bot: DiscordBot):
     bot.add_cog(Config(bot))
