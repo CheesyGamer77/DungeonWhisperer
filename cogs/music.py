@@ -259,27 +259,6 @@ class Music(commands.Cog):
     def on_track_end(self, error: Optional[Exception]):
         return 0
 
-    @is_guild_moderator()
-    @commands.command(name="play", aliases=["p"])
-    async def play_command(self, ctx: Context, voice_channel: Optional[discord.VoiceChannel]):
-        """
-        Starts playing music from the Minecraft Dungeons soundtrack
-        """
-    
-        if not voice_channel:
-            voice_channel = ctx.author.voice.channel
-
-        voice_client: Optional[discord.VoiceClient] = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-        if not voice_client:
-            voice_client = await voice_channel.connect()
-
-        if voice_client and not voice_client.is_playing():
-            track = self.get_next_track()
-
-            await ctx.send(embed=track.embed)
-
-            voice_client.play(discord.PCMVolumeTransformer(track.source), after=self.on_track_end)
-
     async def modify_radio_message(self, ctx: Context, *, embed: Embed):
         """Modifies the radio message for a guild
         
@@ -319,6 +298,27 @@ class Music(commands.Cog):
                 self.logger.info(f"Set missing radio_message_id to message {message.id} ({message.jump_url})")
             except discord.Forbidden:
                 self.logger.error(f"Attempt to set new radio message failed for guild {ctx.guild.id}, channel {ctx.channel.id}")
+
+    @is_guild_moderator()
+    @commands.command(name="play", aliases=["p"])
+    async def play_command(self, ctx: Context, voice_channel: Optional[discord.VoiceChannel]):
+        """
+        Starts playing music from the Minecraft Dungeons soundtrack
+        """
+    
+        if not voice_channel:
+            voice_channel = ctx.author.voice.channel
+
+        voice_client: Optional[discord.VoiceClient] = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
+        if not voice_client:
+            voice_client = await voice_channel.connect()
+
+        if voice_client and not voice_client.is_playing():
+            track = self.get_next_track()
+
+            await self.modify_radio_message(ctx, embed=track.embed)
+
+            voice_client.play(discord.PCMVolumeTransformer(track.source), after=self.on_track_end)
 
     @is_guild_moderator()
     @commands.command(name="stop")
