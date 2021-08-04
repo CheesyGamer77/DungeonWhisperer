@@ -305,7 +305,7 @@ class Music(commands.Cog):
             self._play_track(ctx, voice_client, self.get_next_track())
         
         # edit the embed and start playing
-        asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed))
+        asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed), loop=self.bot.loop)
         voice_client.play(discord.PCMVolumeTransformer(track.source), after=after_playing)
 
     @is_guild_moderator()
