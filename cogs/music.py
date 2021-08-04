@@ -302,7 +302,9 @@ class Music(commands.Cog):
 
     def _play_track(self, ctx: Context, voice_client: discord.VoiceClient, track: MusicTrackProxy):
         def after_playing(error: Exception):
-            self._play_track(ctx, voice_client, self.get_next_track())
+            voice_client = discord.utils.get(self.bot.voice_clients, uild=ctx.guild)
+            if voice_client:
+                self._play_track(ctx, voice_client, self.get_next_track())
         
         # edit the embed and start playing
         asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed), loop=self.bot.loop)
