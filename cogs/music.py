@@ -257,9 +257,6 @@ class Music(commands.Cog):
             color=color
         )
 
-    def on_track_end(self, error: Optional[Exception]):
-        return 0
-
     async def modify_radio_message(self, ctx: Context, *, embed: Embed):
         """Modifies the radio message for a guild
         
@@ -301,10 +298,14 @@ class Music(commands.Cog):
                 self.logger.error(f"Attempt to set new radio message failed for guild {ctx.guild.id}, channel {ctx.channel.id}")
 
     def _play_track(self, ctx: Context, voice_client: discord.VoiceClient, track: MusicTrackProxy):
+        self.logger.debug(f"Playing track {track.title!r} in guild {ctx.guild.id}, channel {voice_client.channel.id}")
+
         def after_playing(error: Exception):
-            voice_client = discord.utils.get(self.bot.voice_clients, uild=ctx.guild)
+            voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
             if voice_client:
                 self._play_track(ctx, voice_client, self.get_next_track())
+            else:
+                self.logger.info(f"Missing voice client for guild {ctx.guild}")
         
         # edit the embed and start playing
         asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed), loop=self.bot.loop)
