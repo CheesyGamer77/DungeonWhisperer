@@ -12,5 +12,6 @@ bot.load_extension("cogs.community_pins")
 bot.load_extension("cogs.music")
 bot.load_extension("cogs.embeds")
 bot.load_extension("cogs.components")
+bot.load_extension("cogs.config")
 
 bot.run("token.txt")
