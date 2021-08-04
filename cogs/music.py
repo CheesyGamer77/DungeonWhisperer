@@ -1,3 +1,4 @@
+import asyncio
 import discord
 import datetime
 import json
@@ -299,6 +300,14 @@ class Music(commands.Cog):
             except discord.Forbidden:
                 self.logger.error(f"Attempt to set new radio message failed for guild {ctx.guild.id}, channel {ctx.channel.id}")
 
+    def _play_track(self, ctx: Context, voice_client: discord.VoiceClient, track: MusicTrackProxy):
+        def after_playing(error: Exception):
+            self._play_track(ctx, voice_client, self.get_next_track())
+        
+        # edit the embed and start playing
+        asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed))
+        voice_client.play(discord.PCMVolumeTransformer(track.source), after=after_playing)
+
     @is_guild_moderator()
     @commands.command(name="play", aliases=["p"])
     async def play_command(self, ctx: Context, voice_channel: Optional[discord.VoiceChannel]):
@@ -314,11 +323,7 @@ class Music(commands.Cog):
             voice_client = await voice_channel.connect()
 
         if voice_client and not voice_client.is_playing():
-            track = self.get_next_track()
-
-            await self.modify_radio_message(ctx, embed=track.embed)
-
-            voice_client.play(discord.PCMVolumeTransformer(track.source), after=self.on_track_end)
+            self._play_track(ctx, voice_client, self.get_next_track())
 
     @is_guild_moderator()
     @commands.command(name="stop")
@@ -329,17 +334,18 @@ class Music(commands.Cog):
         The bot's radio message will be edited to the default "Nothing Playing" embed
         """
 
-        if not reason:
-            reason = "Check below to see if there is any news on why the bot is not playing music"
+        voice_client: discord.VoiceClient = ctx.guild.voice_client
+        if voice_client:
+            # set default embed
+            embed = self.default_base_embed
+            embed.add_field(
+                name="**Nothing Currently Playing**",
+                value=reason if reason else "Check below to see if there is any news on why the bot is not playing music"
+            )
 
-        # set default embed
-        embed = self.default_base_embed
-        embed.add_field(
-            name="**Nothing Currently Playing**",
-            value=reason
-        )
-
-        await self.modify_radio_message(ctx, embed=embed)
+            await voice_client.disconnect()
+            await self.modify_radio_message(ctx, embed=embed)
+        
 
 
 def setup(bot: DiscordBot):
