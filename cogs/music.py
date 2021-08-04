@@ -6,7 +6,7 @@ import random
 import spotipy
 import os
 from cheesyutils.discord_bots import DiscordBot, Context, Embed
-from cheesyutils.discord_bots.checks import is_guild_moderator
+from cheesyutils.discord_bots.checks import is_guild_moderator, bot_owner_or_guild_moderator
 from dataclasses import dataclass
 from discord.ext import commands
 from io import StringIO
@@ -39,20 +39,28 @@ class MusicTrackProxy:
         )
 
 
-class NoVoiceChannel(commands.CommandError):
+def bot_has_voice_state(*, connected: bool = True, playing: bool = None, paused: bool = None):
     """
-    Raised when the bot requires a music channel to use a particular command
+    A check that determines if the bot has a particular voice state
+
+    Parameters
+    ----------
+    connected : bool
+        Whether the bot should be connected to a voice channel.
+        This defaults to `True`.
+    playing : bool
+        Whether the bot should be currently playing audio.
+        This defaults to `None` (indifferent).
+    paused : bool
+        Whether the bot's playback should be paused.
+        This defaults to `None` (indifferent)
     """
 
-    pass
-
-
-class AlreadyInVoiceChannel(commands.CommandError):
-    """
-    Raised when the bot is already in a voice channel
-    """
-
-    pass
+    async def predicate(ctx: Context):
+        client: discord.VoiceClient = ctx.guild.voice_client
+        return client is not None
+    
+    return commands.check(predicate)
 
 
 class Music(commands.Cog):
@@ -80,16 +88,53 @@ class Music(commands.Cog):
         client = spotipy.Spotify(client_credentials_manager=self._get_spotify_credentials_manager())
         return client.album(album_url)
 
+    async def retrieve_radio_text_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
+        row = await self.bot.database.query_first(
+            "SELECT radio_text_channel_id FROM config WHERE server_id = ?",
+            parameters=(guild.id,)
+        )
+
+        if row:
+            channel_id: Optional[int] = row["radio_text_channel_id"]
+            if channel_id:
+                channel = await self.bot.retrieve_channel(channel_id)
+                if isinstance(channel, discord.TextChannel):
+                    self.logger.debug(f"Fetched radio text channel for guild {guild.id}: {channel.id} ({channel.name})")
+                    return channel
+        
+        return None
+    
+    async def retrieve_radio_message(self, guild: discord.Guild) -> Optional[discord.VoiceChannel]:
+        # we first need to retrieve the radio text channel
+
+        text_channel = await self.retrieve_radio_text_channel(guild)
+        if text_channel:
+            row = await self.bot.database.query_first(
+                "SELECT radio_message_id FROM config WHERE server_id = ?",
+                parameters=(guild.id,)
+            )
+
+            if row:
+                message_id = row["radio_message_id"]
+
+                if message_id:
+                    message = await self.bot.retrieve_message(text_channel.id, message_id)
+                    if message:
+                        self.logger.debug(f"Fetched radio message for guild {guild.id}: {message.jump_url}")
+                        return message
+        
+        return None
+
     @property
-    def default_embed(self) -> Embed:
+    def default_base_embed(self) -> Embed:
         return Embed(
-            title="Nothing Currently Playing",
-            description="Check below to see if there is any news on why the bot is not playing music",
-            color=discord.Color.from_rgb(48, 136, 214)
+            color=discord.Color.from_rgb(162, 162, 162)
+        ).set_thumbnail(
+            url="https://cdn.discordapp.com/attachments/728166911686344755/866689668434100264/Not_Playing.png"
         )
 
     
-    @is_guild_moderator()
+    @bot_owner_or_guild_moderator()
     @commands.command(name="ping")
     async def ping_command(self, ctx: Context):
         """
@@ -110,7 +155,7 @@ class Music(commands.Cog):
             value=round((datetime.datetime.now() - now).microseconds / 1000, 2)
         )
 
-        voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
+        voice_client = ctx.guild.voice_client
         if voice_client and isinstance(voice_client, discord.VoiceClient):
             embed.add_field(
                 name="Voice",
@@ -143,6 +188,24 @@ class Music(commands.Cog):
         return "Not set"
 
     def get_track_audio_source(self, root: str, name: str) -> discord.FFmpegPCMAudio:
+        """Gets a track's audio source given a root directory to search through
+
+        Parameters
+        ----------
+        root : str
+            The path to the root directory to search through
+        name : str
+            The name of the track to search for
+
+        Raises
+        ------
+        `ValueError` if the track was not found
+
+        Returns
+        -------
+        A `discord.FFmpegPCMAudio` object associated with the track
+        """
+        
         self.logger.debug("Searching in %s for track named %s", root, name)
         for item in os.listdir(root):
             # audio tracks typically have a track number prepended to the file name
@@ -154,6 +217,7 @@ class Music(commands.Cog):
             if item_name == name:
                 return discord.FFmpegPCMAudio(f"{root}/{item}")
         
+        self.logger.error(f"No track found in {root} named {name!r}")
         raise ValueError(f"Track {name!r} not found")
 
     def get_next_track(self, root: str="albums") -> MusicTrackProxy:
@@ -197,34 +261,86 @@ class Music(commands.Cog):
 
     @is_guild_moderator()
     @commands.command(name="play", aliases=["p"])
-    async def play_command(self, ctx: Context):
+    async def play_command(self, ctx: Context, voice_channel: Optional[discord.VoiceChannel]):
         """
         Starts playing music from the Minecraft Dungeons soundtrack
         """
     
+        if not voice_channel:
+            voice_channel = ctx.author.voice.channel
+
         voice_client: Optional[discord.VoiceClient] = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-        if voice_client and voice_client.is_connected() and not voice_client.is_playing():
+        if not voice_client:
+            voice_client = await voice_channel.connect()
+
+        if voice_client and not voice_client.is_playing():
             track = self.get_next_track()
+
             await ctx.send(embed=track.embed)
-            await voice_client.play(discord.PCMVolumeTransformer(track.source), after=self.on_track_end)
-            await ctx.send("P")
+
+            voice_client.play(discord.PCMVolumeTransformer(track.source), after=self.on_track_end)
+
+    async def modify_radio_message(self, ctx: Context, *, embed: Embed):
+        """Modifies the radio message for a guild
+        
+        If a radio message is not set, the bot attempts to find and set one if a radio text channel is set.
+        If there is no radio text channel set, this will do nothing.
+
+        Parameters
+        ----------
+        ctx : Context
+            The invokation context from tehe guild/channel you wish to modify the radio channel of
+        embed : Embed
+            The embed to put as the modified radio message
+        """
+        
+        message = await self.retrieve_radio_message(ctx.guild)
+        if message:
+            # easy, just edit the message
+            try:
+                await message.edit(embed=embed)
+            except discord.Forbidden:
+                self.logger.error(f"Failed to modify radio message {message.jump_url} - Insufficient permissions")
+        else:
+            # try to get a radio channel
+            channel = await self.retrieve_radio_text_channel(ctx.guild)
+            if not channel:
+                channel = ctx.channel
+            
+            # set a new radio message
+            try:
+                message: discord.Message = await channel.send(embed=embed)
+
+                await self.bot.database.execute(
+                    "INSERT INTO config (server_id, radio_message_id) VALUES (?, ?) ON CONFLICT (server_id) DO UPDATE SET radio_message_id = ? WHERE server_id = ?",
+                    parameters=(ctx.guild.id, message.id, message.id, ctx.guild.id)
+                )
+
+                self.logger.info(f"Set missing radio_message_id to message {message.id} ({message.jump_url})")
+            except discord.Forbidden:
+                self.logger.error(f"Attempt to set new radio message failed for guild {ctx.guild.id}, channel {ctx.channel.id}")
 
     @is_guild_moderator()
     @commands.command(name="stop")
-    async def stop_command(self, ctx: Context):
+    async def stop_command(self, ctx: Context, *, reason: Optional[str]):
         """
-        Stops playing music and leaves the voice channel
+        Stops playing music and leaves the voice channel, with an optional reason
+
+        The bot's radio message will be edited to the default "Nothing Playing" embed
         """
 
-        pass
+        if not reason:
+            reason = "Check below to see if there is any news on why the bot is not playing music"
 
-    @play_command.before_invoke
-    async def ensure_voice_state(self, ctx: Context):
-        if not ctx.author.voice or not ctx.author.voice.channel:
-            raise NoVoiceChannel
-        
-        if discord.utils.get(self.bot.voice_clients, guild=ctx.guild):
-            raise AlreadyInVoiceChannel
+        # set default embed
+        embed = self.default_base_embed
+        embed.add_field(
+            name="**Nothing Currently Playing**",
+            value=reason
+        )
+
+        await self.modify_radio_message(ctx, embed=embed)
+
 
 def setup(bot: DiscordBot):
     bot.add_cog(Music(bot))
