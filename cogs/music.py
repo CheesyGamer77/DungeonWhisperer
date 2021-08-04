@@ -75,7 +75,7 @@ class Music(commands.Cog):
         self.logger = logging.getLogger("music")
         self.logger.setLevel(logging.DEBUG)
         handler = logging.FileHandler(filename="DungeonWhisperer.log", encoding="utf-8", mode="a")
-        handler.setFormatter(logging.Formatter("%(asctime)s: [%(levelname)s]: (%(name)s)): %(message)s"))
+        handler.setFormatter(logging.Formatter("%(asctime)s: [%(levelname)s]: (%(name)s): %(message)s"))
         self.logger.addHandler(handler)
 
     def _get_spotify_credentials_manager(self, fp: str="spotify_credentials.json") -> SpotifyClientCredentials:
