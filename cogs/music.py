@@ -100,6 +100,7 @@ class MusicTrackProxy:
                     "album_url": album_urls["YouTube Music"]
                 }
 
+                urls_str = "\n".join([f"{item['emoji']} [Track {track_number}]({item['track_url']}) **|** [Album]({item['album_url']})" for key, item in urls.items()])
                 track_url_str = "\n".join([f"{item['emoji']} [{key}]({item['track_url']})" for key, item in urls.items()])
                 album_url_str = "\n".join([f"{item['emoji']} [{key}]({item['album_url']})" for key, item in urls.items()])
 
@@ -114,11 +115,8 @@ class MusicTrackProxy:
             value=f"By {', '.join([artist for artist in self.artists])} | Duration: {self.duration}\nTrack {track_number} of the {self.island_realm} album",
             inline=False
         ).add_field(
-            name="Track URLs",
-            value=track_url_str
-        ).add_field(
-            name="Album URLs",
-            value=album_url_str
+            name="**Music URLs**",
+            value=urls_str
         ).set_footer(
             text=f"Duration: {self.duration}"
         )
@@ -269,8 +267,8 @@ class Music(commands.Cog):
         await ctx.send(file=discord.File(StringIO(json.dumps(client.album(album_url), indent=4)), filename="album.json"))
 
     def get_duration_string(self, ms: int):
-        minutes = round((ms / 1000) / 60)
-        seconds = round((ms / 1000) % 60)
+        minutes = int((ms / 1000) / 60)
+        seconds = int((ms / 1000) % 60)
 
         seconds = f"0{seconds}" if seconds < 10 else seconds
 
@@ -388,16 +386,19 @@ class Music(commands.Cog):
     def _play_track(self, ctx: Context, voice_client: discord.VoiceClient, track: MusicTrackProxy):
         self.logger.debug(f"Playing track {track.title!r} in guild {ctx.guild.id}, channel {voice_client.channel.id}")
 
-        def after_playing(error: Exception):            
+        def after_playing(error: Optional[Exception]):
             voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-            if error:
-                self.logger.exception(f"Error while playing track {track.title!r} in guild {ctx.guild.id}: {error.__class__.__name__}. Skipping track.")
-                self._play_track(ctx, voice_client, self.get_next_track)
-                
-            if voice_client:
-                self._play_track(ctx, voice_client, self.get_next_track())
-            else:
-                self.logger.info(f"Missing voice client for guild {ctx.guild.id}")
+
+            try:
+                if error:
+                    raise error
+            except Exception as err:
+                self.logger.exception(f"Error while playing track {track.title!r} in guild {ctx.guild.id}: {err.__class__.__name__}. Skipping track.")
+            finally:
+                if voice_client:
+                    self._play_track(ctx, voice_client, self.get_next_track())
+                else:
+                    self.logger.info(f"Missing voice client for guild {ctx.guild.id}")        
         
         # edit the embed and start playing
         asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed), loop=self.bot.loop)
