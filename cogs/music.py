@@ -54,56 +54,73 @@ class MusicTrackProxy:
 
     @property
     def embed(self) -> Embed:
-        # find the urls for each track
+        track_number = "?"
+
         urls = {
             "Spotify": {
                 "emoji": "<:Spotify:869112865615937576>",
-                "url": self.track_url
+                "track_url": self.track_url,
+                "album_url": self.album_url
             }
         }
 
+        track_url_str = "???"
+        album_url_str = "???"
+
+        # find the urls for each track
         with open(f"albums/{self.island_realm}/urls.csv", "r") as csv_file:
             reader = csv.DictReader(csv_file)
 
-            other_urls: List[dict] = list(filter(lambda d: d["TrackName"] == self.title, reader))
+            # set track urls
+            track_urls = discord.utils.find(lambda d: d["TrackName"] == self.title, reader)
+            album_urls = list(reader)[0]
+            if track_urls is not None and album_urls is not None:
+                track_number = track_urls["Track"]
+                urls["Amazon Music"] = {
+                    "emoji": "<:Amazon_Music:869112865532030996>",
+                    "track_url": track_urls["Amazon Music"],
+                    "album_url": album_urls["Amazon Music"]
+                }
 
-            if other_urls:
-                for item in other_urls:
-                    urls["Amazon Music"] = {
-                        "url": item["Amazon Music"],
-                        "emoji": "<:Amazon_Music:869112865532030996>",
-                    }
+                urls["Apple Music"] = {
+                    "emoji": "<:Apple_Music:869112865599131669>",
+                    "track_url": track_urls["Apple Music"],
+                    "album_url": album_urls["Apple Music"]
+                }
 
-                    urls["Apple Music"] = {
-                        "url": item["Apple Music"],
-                        "emoji": "<:Apple_Music:869112865599131669>"
-                    }
+                urls["Deezer"] = {
+                    "emoji": "<:Deezer:869112866022780948>",
+                    "track_url": track_urls["Deezer"],
+                    "album_url": album_urls["Deezer"]
+                }
 
-                    urls["Deezer"] = {
-                        "url": item["Deezer"],
-                        "emoji": "<:Deezer:869112866022780948>"
-                    }
+                urls["YouTube Music"] = {
+                    "emoji": "<:YouTube_Music:869112866282807356>",
+                    "track_url": track_urls["YouTube Music"],
+                    "album_url": album_urls["YouTube Music"]
+                }
 
-                    urls["YouTube Music"] = {
-                        "url": item["YouTube Music"],
-                        "emoji": "<:YouTube_Music:869112866282807356>"
-                    }
+                track_url_str = "\n".join([f"{item['emoji']} [{key}]({item['track_url']})" for key, item in urls.items()])
+                album_url_str = "\n".join([f"{item['emoji']} [{key}]({item['album_url']})" for key, item in urls.items()])
 
         return Embed(
             color=self.color
         ).set_thumbnail(
             url=self.thumbnail_url
         ).set_author(
-            name="Now Playing ♪"
+            name="♪ Now Playing"
         ).add_field(
             name=f"**{self.title} - {self.island_realm}**",
-            value=f"Artists: {', '.join([artist for artist in self.artists])}"
-        ).add_field(
-            name="Track URLS",
-            value="\n".join(['• {} [{}]({})'.format(item["emoji"], key, item['url']) for key, item in urls.items()]),
+            value=f"By {', '.join([artist for artist in self.artists])} | Duration: {self.duration}\nTrack {track_number} of the {self.island_realm} album",
             inline=False
+        ).add_field(
+            name="Track URLs",
+            value=track_url_str
+        ).add_field(
+            name="Album URLs",
+            value=album_url_str
         ).set_footer(
-            text=f"Length: {self.duration}"
+            text=f"Duration: {self.duration}"
         )
 
 
@@ -252,7 +269,12 @@ class Music(commands.Cog):
         await ctx.send(file=discord.File(StringIO(json.dumps(client.album(album_url), indent=4)), filename="album.json"))
 
     def get_duration_string(self, ms: int):
-        return "Not set"
+        minutes = round((ms / 1000) / 60)
+        seconds = round((ms / 1000) % 60)
+
+        seconds = f"0{seconds}" if seconds < 10 else seconds
+
+        return f"{minutes}:{seconds}"
 
     def get_track_audio_source(self, root: str, name: str) -> discord.FFmpegPCMAudio:
         """Gets a track's audio source given a root directory to search through
