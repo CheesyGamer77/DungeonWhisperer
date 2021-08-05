@@ -18,6 +18,30 @@ from typing import List, Optional
 
 @dataclass
 class MusicTrackProxy:
+    """A dataclass that assists with getting data for music tracks
+
+    Attributes
+    ----------
+    title : str
+        The name of the track
+    artists : List[str]
+        The list of artist names of the track
+    island_realm : str
+        The island realm where the track originates from
+    duration : str
+        The duration string for how long a track is
+    source : discord.FFmpegPCMAudio
+        The Discord PCM audio source to use to play the track
+    track_url : str
+        The spotify url for the track
+    album_url : str
+        The spotify album url for the track
+    thumbnail_url : str
+        The url of the thumbnail to use for the embed
+    color : discord.Color
+        The color to use for the track's embed
+    """
+    
     title: str
     artists: List[str]
     island_realm: str
@@ -38,6 +62,33 @@ class MusicTrackProxy:
             }
         }
 
+        with open(f"albums/{self.island_realm}/urls.csv", "r") as csv_file:
+            reader = csv.DictReader(csv_file)
+
+            other_urls: List[dict] = list(filter(lambda d: d["TrackName"] == self.title, reader))
+
+            if other_urls:
+                for item in other_urls:
+                    urls["Amazon Music"] = {
+                        "url": item["Amazon Music"],
+                        "emoji": "<:Amazon_Music:869112865532030996>",
+                    }
+
+                    urls["Apple Music"] = {
+                        "url": item["Apple Music"],
+                        "emoji": "<:Apple_Music:869112865599131669>"
+                    }
+
+                    urls["Deezer"] = {
+                        "url": item["Deezer"],
+                        "emoji": "<:Deezer:869112866022780948>"
+                    }
+
+                    urls["YouTube Music"] = {
+                        "url": item["YouTube Music"],
+                        "emoji": "<:YouTube_Music:869112866282807356>"
+                    }
+
         return Embed(
             color=self.color
         ).set_thumbnail(
@@ -49,7 +100,8 @@ class MusicTrackProxy:
             value=f"Artists: {', '.join([artist for artist in self.artists])}"
         ).add_field(
             name="Track URLS",
-            value="\n".join(['• {} [{}]({})'.format(item["emoji"], key, item['url']) for key, item in urls.items()])
+            value="\n".join(['• {} [{}]({})'.format(item["emoji"], key, item['url']) for key, item in urls.items()]),
+            inline=False
         ).set_footer(
             text=f"Length: {self.duration}"
         )
@@ -149,7 +201,6 @@ class Music(commands.Cog):
             url="https://cdn.discordapp.com/attachments/728166911686344755/866689668434100264/Not_Playing.png"
         )
 
-    
     @bot_owner_or_guild_moderator()
     @commands.command(name="ping")
     async def ping_command(self, ctx: Context):
@@ -231,7 +282,7 @@ class Music(commands.Cog):
             # self.logger.debug(f"Found item named {item_name!r}")
 
             if item_name == name:
-                return discord.FFmpegPCMAudio(f"{root}/{item}", before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5')
+                return discord.FFmpegPCMAudio(f"{root}/{item}")
         
         self.logger.error(f"No track found in {root} named {name!r}")
         raise ValueError(f"Track {name!r} not found")
