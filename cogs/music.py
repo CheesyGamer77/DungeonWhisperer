@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import discord
 import datetime
 import json
@@ -29,14 +30,28 @@ class MusicTrackProxy:
 
     @property
     def embed(self) -> Embed:
+        # find the urls for each track
+        urls = {
+            "Spotify": {
+                "emoji": "<:Spotify:869112865615937576>",
+                "url": self.track_url
+            }
+        }
+
         return Embed(
-            title=self.title,
-            color=self.color,
-            url=self.track_url,
+            color=self.color
         ).set_thumbnail(
             url=self.thumbnail_url
         ).set_author(
             name="Now Playing ♪"
+        ).add_field(
+            name=f"**{self.title} - {self.island_realm}**",
+            value=f"Artists: {', '.join([artist for artist in self.artists])}"
+        ).add_field(
+            name="Track URLS",
+            value="\n".join(['• {} [{}]({})'.format(item["emoji"], key, item['url']) for key, item in urls.items()])
+        ).set_footer(
+            text=f"Length: {self.duration}"
         )
 
 
@@ -216,7 +231,7 @@ class Music(commands.Cog):
             # self.logger.debug(f"Found item named {item_name!r}")
 
             if item_name == name:
-                return discord.FFmpegPCMAudio(f"{root}/{item}")
+                return discord.FFmpegPCMAudio(f"{root}/{item}", before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5')
         
         self.logger.error(f"No track found in {root} named {name!r}")
         raise ValueError(f"Track {name!r} not found")
@@ -300,12 +315,16 @@ class Music(commands.Cog):
     def _play_track(self, ctx: Context, voice_client: discord.VoiceClient, track: MusicTrackProxy):
         self.logger.debug(f"Playing track {track.title!r} in guild {ctx.guild.id}, channel {voice_client.channel.id}")
 
-        def after_playing(error: Exception):
+        def after_playing(error: Exception):            
             voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
+            if error:
+                self.logger.exception(f"Error while playing track {track.title!r} in guild {ctx.guild.id}: {error.__class__.__name__}. Skipping track.")
+                self._play_track(ctx, voice_client, self.get_next_track)
+                
             if voice_client:
                 self._play_track(ctx, voice_client, self.get_next_track())
             else:
-                self.logger.info(f"Missing voice client for guild {ctx.guild}")
+                self.logger.info(f"Missing voice client for guild {ctx.guild.id}")
         
         # edit the embed and start playing
         asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed), loop=self.bot.loop)
