@@ -51,6 +51,7 @@ class MusicTrackProxy:
     album_url: str
     thumbnail_url: str
     color: discord.Color
+    logger: logging.Logger = logging.getLogger("music")
 
     @property
     def embed(self) -> Embed:
@@ -64,16 +65,25 @@ class MusicTrackProxy:
             }
         }
 
-        track_url_str = "???"
-        album_url_str = "???"
-
         # find the urls for each track
         with open(f"albums/{self.island_realm}/urls.csv", "r") as csv_file:
             reader = csv.DictReader(csv_file)
 
             # set track urls
             track_urls = discord.utils.find(lambda d: d["TrackName"] == self.title, reader)
-            album_urls = list(reader)[0]
+
+            # this is weird as fuck
+            # there is a very rare chance for reader to return empty rows, and as a result causes an index error below
+            # to prevent the bot from stopping audio playback, if this error occurs, the error will be ignored,
+            # however there will be only spotify track/album urls displayed as well as no track number being displayed
+            # TODO: Please fix this absolute dumpsterfire
+            try:
+                album_urls = list(reader)[0]
+            except IndexError:
+                # 
+                album_urls = None
+                self.logger.warn(f"IndexError while playing track {self.title!r}. Reader rows: {[str(row) for row in reader]}")
+
             if track_urls is not None and album_urls is not None:
                 track_number = track_urls["Track"]
                 urls["Amazon Music"] = {
@@ -100,10 +110,6 @@ class MusicTrackProxy:
                     "album_url": album_urls["YouTube Music"]
                 }
 
-                urls_str = "\n".join([f"{item['emoji']} [Track {track_number}]({item['track_url']}) **|** [Album]({item['album_url']})" for key, item in urls.items()])
-                track_url_str = "\n".join([f"{item['emoji']} [{key}]({item['track_url']})" for key, item in urls.items()])
-                album_url_str = "\n".join([f"{item['emoji']} [{key}]({item['album_url']})" for key, item in urls.items()])
-
         return Embed(
             color=self.color
         ).set_thumbnail(
@@ -116,7 +122,7 @@ class MusicTrackProxy:
             inline=False
         ).add_field(
             name="**Music URLs**",
-            value=urls_str
+            value="\n".join([f"{item['emoji']} [Track {track_number}]({item['track_url']}) **|** [Album]({item['album_url']})" for key, item in urls.items()])
         ).set_footer(
             text=f"Duration: {self.duration}"
         )
