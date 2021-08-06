@@ -7,8 +7,7 @@ import logging
 import random
 import spotipy
 import os
-from cheesyutils.discord_bots import DiscordBot, Context, Embed
-from cheesyutils.discord_bots.checks import is_guild_moderator, bot_owner_or_guild_moderator
+from cheesyutils.discord_bots import DiscordBot, Context, Embed, is_guild_moderator, bot_owner_or_guild_moderator
 from dataclasses import dataclass
 from discord.ext import commands
 from io import StringIO
@@ -266,9 +265,52 @@ class Music(commands.Cog):
         Returns a JSON file representation of a particular spotify album
         """
 
-        client = spotipy.Spotify(client_credentials_manager=self._get_spotify_credentials_manager())
-        await ctx.send(file=discord.File(StringIO(json.dumps(client.album(album_url), indent=4)), filename="album.json"))
+        def __remove_available_market_data(d: dict) -> dict:
+            """Removes the "available_markets" lists from album JSON data
+            
+            These lists are so obnoxiously large and annoying, thats why this exists
 
+            Parameters
+            ----------
+            d : dict
+                The raw JSON data returned from spotify
+            
+            Returns
+            -------
+            The modified `dict` object, without the "available_markets" lists
+            """
+
+            if d.get("available_markets"):
+                del d["available_markets"]
+
+            if d.get("tracks"):
+                for i in range(len(d["tracks"]["items"])):
+                    del d["tracks"]["items"][i]["available_markets"]
+            else:
+                for i in range(len(d["items"])):
+                    del d["items"][i]["available_markets"]
+
+            return d
+
+        client = spotipy.Spotify(client_credentials_manager=self._get_spotify_credentials_manager())
+        
+        # Spotify pages album requests after 50 tracks, so make sure to include the second page
+        # NOTE: This does *not* account for more than two potential pages, cause lets be honest:
+        # if a game DLC soundtrack has more than 100 tracks, chances are half of it is
+        # not important
+
+        data: dict = client.album(album_url)
+        data = __remove_available_market_data(data)
+
+        next_page = data["tracks"].get("next", False)
+
+        if next_page:
+            # get the second page of tracks
+            data_2 = __remove_available_market_data(client.next(data["tracks"]))
+            data["tracks"]["items"] = data["tracks"]["items"] + data_2["items"]
+        
+        await ctx.send(file=discord.File(StringIO(json.dumps(data, indent=4)), filename="album.json"))
+        
     def get_duration_string(self, ms: int):
         minutes = int((ms / 1000) / 60)
         seconds = int((ms / 1000) % 60)
