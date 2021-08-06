@@ -80,7 +80,6 @@ class MusicTrackProxy:
             try:
                 album_urls = list(reader)[0]
             except IndexError:
-                # 
                 album_urls = None
                 self.logger.warn(f"IndexError while playing track {self.title!r}. Reader rows: {[str(row) for row in reader]}")
 
@@ -117,14 +116,12 @@ class MusicTrackProxy:
         ).set_author(
             name="♪ Now Playing"
         ).add_field(
-            name=f"**{self.title} - {self.island_realm}**",
+            name=f"**{self.title}**",
             value=f"By {', '.join([artist for artist in self.artists])} | Duration: {self.duration}\nTrack {track_number} of the {self.island_realm} album",
             inline=False
         ).add_field(
             name="**Music URLs**",
             value="\n".join([f"{item['emoji']} [Track {track_number}]({item['track_url']}) **|** [Album]({item['album_url']})" for key, item in urls.items()])
-        ).set_footer(
-            text=f"Duration: {self.duration}"
         )
 
 
