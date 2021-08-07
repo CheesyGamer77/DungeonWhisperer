@@ -992,7 +992,7 @@ class Components(commands.Cog):
             components=components
         )
 
-        await ctx.reply_success("Menu removed")    
+        await ctx.reply_success("Menu removed")
 
     @commands.guild_only()
     @commands.is_owner()
@@ -1244,6 +1244,7 @@ class Components(commands.Cog):
             )]
 
         await action(content=content, components=components)
+        await ctx.reply_success(f"{button_type.name.capitalize()} button {custom_id} added")
 
     @commands.guild_only()
     @is_guild_moderator()
@@ -1268,12 +1269,30 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @button_group.command(name="remove")
-    async def button_remove_command(self, ctx: Context):
+    async def button_remove_command(self, ctx: Context, message: discord.Message, button_id: str):
         """
         Removes a button from a message
         """
     
-        pass
+        components = await self.fetch_all_components(message)
+        
+        for i, component in enumerate(components):
+            if isinstance(component, ActionRow):
+                for j, inner_component in enumerate(component.components):
+                    if isinstance(inner_component, Button) and inner_component.custom_id == button_id:
+                        del components[i].components[j]
+                        break
+            elif isinstance(component, Button) and component.custom_id == button_id:
+                del components[i]
+                break
+        
+        await message.edit(
+            content=message.content,
+            embed=message.embeds[0] if message.embeds else None,
+            components=components
+        )
+
+        await ctx.reply_success("Button removed")
 
     @commands.guild_only()
     @is_guild_moderator()
