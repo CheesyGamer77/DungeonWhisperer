@@ -10,18 +10,6 @@ from io import StringIO
 from typing import Any, Generator, List, Optional
 
 
-@dataclass
-class MessageDataProxy:
-    """
-    A proxy class mostly for making our upload command easier to deal with
-
-    In some cases, discohook provides multiple syntaxes for storing message data, so this helps us
-    deal with both when using the upload command
-    """
-    
-    content: Optional[str] = field(default=None)
-    embed: Optional[Embed] = field(default=None)
-
 class Embeds(commands.Cog):
     """
     Commands for creating embeds
