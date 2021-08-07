@@ -1,13 +1,14 @@
-from cheesyutils.discord_bots.errors import PromptTimedout
 from dislash import ActionRow, Button, Component, MessageInteraction, SelectMenu, SelectOption
 import discord
 import io
 import json
 import logging
-from cheesyutils.discord_bots import DiscordBot, Context, Embed, is_guild_moderator
+from cheesyutils.discord_bots import DiscordBot, Context, Embed, is_guild_moderator, PromptTimedout
+from cheesyutils.discord_bots.converters import RangedInteger
+from cheesyutils.discord_bots.types import NameConvertibleEnum
 from discord.ext import commands
 from enum import Enum
-from typing import Callable, Generator, List, Optional, Union
+from typing import Any, Callable, Generator, List, Optional, Union
 
 class ComponentType(Enum):
     # yes, dislash has a class for this, but the author
@@ -120,15 +121,6 @@ class RoleGroup:
         raise RoleGroupNotFound(argument)
 
 
-class NameConvertibleEnum(Enum):
-    @classmethod
-    async def convert(cls, ctx: Context, argument: str) -> "NameConvertibleEnum":
-        try:
-            return getattr(cls, argument)
-        except ValueError:
-            raise ConversionFailed(argument, f"{argument!r} is not a valid selection")
-
-
 class MenuEvent(NameConvertibleEnum):
     on_select = 0
     on_unselect = 1
@@ -165,21 +157,6 @@ class RangeConstraintFailure(ConversionFailed):
         self.arument = argument
         self.minumum = minimum
         self.maximum = maximum
-
-
-class RangedInteger(commands.Converter):
-    def __init__(self, *, minimum: int, maximum: int):
-        self.minimum = minimum
-        self.maximum = maximum
-    
-    async def convert(self, ctx: Context, argument: str):
-        try:
-            arg = int(argument)
-        except ValueError:
-            raise IntegerRequired
-        
-        if not (self.minimum <= arg <= self.maximum):
-            raise RangeConstraintFailure(arg, self.minimum, self.maximum)
 
 
 class Components(commands.Cog):
@@ -253,6 +230,42 @@ class Components(commands.Cog):
 
         return raw_components  # empty list
 
+    def update_button(self, components: List[Component], button_id: str, setter: Callable[[Button], Button]) -> List[Component]:
+        """Updates a button contained within a component list, and returns the updated list.
+
+        Action Rows are walked through and updated automatically
+
+        Parameters
+        ----------
+        components : List[Component]
+            The list of components to search through
+        button_id : str
+            The custom ID of the button to update
+        setter : Callable[Button]->Button
+            The setter function to execute on the button. This callable should take
+            one parameter - the button to update - and return the updated button
+        
+        Returns
+        -------
+        The updated list of components
+        """
+
+        for i, component in enumerate(components):
+            if isinstance(component, ActionRow):
+                # walk through the action row's components and update as well
+                for j, inner_component in enumerate(component.components):                    
+                    if isinstance(inner_component, Button) and inner_component.custom_id == button_id:
+                        inner_component = setter(inner_component)
+                        component.components[j] = inner_component
+                        components[i] = component
+                        return components
+            elif isinstance(component, Button) and component.custom_id == button_id:
+                component = setter(component)
+                components[i] = component
+                return components
+            
+        return components
+
     def update_menu(self, components: List[Component], menu_id: str, setter: Callable[[SelectMenu], SelectMenu]) -> List[Component]:
         """Updates a menu contained within a component list, and returns the updated list.
 
@@ -288,6 +301,70 @@ class Components(commands.Cog):
                 return components
             
         return components
+    
+    @commands.Cog.listener()
+    async def on_button_click(self, interaction: MessageInteraction):
+        """Ran whenever a button is clicked
+
+        Parameters
+        ----------
+        interaction : MessageInteraction
+            The interaction containing the button clicked
+        """
+
+        # fetch all actions
+        custom_id = interaction.component.custom_id
+        guild = interaction.guild
+        channel = interaction.channel
+        message = interaction.message
+
+        rows = await self.bot.database.query_all(
+            "SELECT * FROM button_actions WHERE server_id = ? AND channel_id = ? AND message_id = ? AND button_id = ? ORDER BY priority ASC",
+            parameters=(guild.id, channel.id, message.id, custom_id)
+        )
+
+        self.logger.debug(f"Received button click interaction on button {custom_id} from guild {guild.id}, message {message.jump_url}")
+
+        actions: List[dict] = [json.loads(row["action"]) for row in rows]
+        self.logger.debug(f"Fetched {len(actions)} actions to execute on click for button {custom_id}")
+
+        for action in actions:
+            action_type = ComponentAction(action["type"])
+
+            if action_type is ComponentAction.send_followup:
+                self.logger.debug(f"Sending follow up message to {interaction.author.id} in guild {guild.id}, channel {channel.id}")
+
+                # extract message JSON like we do with the embeds, and send it
+                # TODO: DUPLICATE CODE!!!!!!!!!!!
+                data: dict = json.loads(action["message"])
+                
+                keys = data.keys()
+                if "version" in keys and "backups" in keys and isinstance(data["backups"], list):
+                    # this is probably discohook's alternative syntax
+
+                    # NOTE: We only look at the first backup
+                    for message in data["backups"][0]["messages"]:
+                        message = message["data"]
+                        for i, embed_json in enumerate(message["embeds"]):
+                            embed_json["type"] = "rich"
+                            await interaction.respond(
+                                message["content"] if i == 0 else None,
+                                embed=Embed.from_dict(embed_json),
+                                ephemeral=True
+                            )
+
+                elif "content" in keys and "embeds" in keys and isinstance(data["embeds"], list):
+                    # this is most likely the standard format discord expects
+                    for i, embed_json in enumerate(data["embeds"]):
+                        embed_json["type"] = "rich"
+
+                        await interaction.respond(
+                            data["content"] if i == 0 else None,
+                            embed=Embed.from_dict(embed_json),
+                            ephemeral=True
+                        )
+                else:
+                    self.logger.error(f"Undefined message action schema for message {message.jump_url} with root keys {keys}")
 
     @commands.Cog.listener()
     async def on_dropdown(self, interaction: MessageInteraction):
@@ -304,7 +381,7 @@ class Components(commands.Cog):
 
         for selected_option in interaction.component.selected_options:
             # extract any on_select actions for the option
-            actions: List[dict] = [json.loads((row)["action"]) for row in rows if MenuEvent(row["event"]) is MenuEvent.on_select and row["label"] == selected_option.label]
+            actions: List[dict] = [json.loads(row["action"]) for row in rows if MenuEvent(row["event"]) is MenuEvent.on_select and row["label"] == selected_option.label]
             self.logger.debug("Found %s actions to execute on select for label %s", len(actions), selected_option.label)
 
             # iterate through each of the selected options
@@ -422,9 +499,6 @@ class Components(commands.Cog):
 
         components = await self.fetch_all_components(message)
 
-        def check(msg: discord.Message) -> bool:
-            return msg.author.id == ctx.author.id and msg.channel.id == ctx.channel.id and msg.content
-
         timeout = 30
 
         # prompt label
@@ -512,12 +586,8 @@ class Components(commands.Cog):
             "type": action.value
         }
 
-        def check(msg: discord.Message) -> bool:
-            return msg.author.id == ctx.author.id and msg.channel.id == ctx.channel.id and msg.content
-
         if action is ComponentAction.add_role or action is ComponentAction.remove_role:
             # prompt for the role
-            
             while True:
                 try:
                     arg = await ctx.prompt_string(Embed(description="Input the name, ID, or mention of the role you want to set"), timeout=30)
@@ -577,7 +647,6 @@ class Components(commands.Cog):
 
         await ctx.send(f"Set option action `{action.name}` on event `{event.name}`", file=discord.File(io.StringIO(json_data), "action_data.json"))
 
-
     @commands.guild_only()
     @is_guild_moderator()
     @selectmenu_option_group.command(name="remove", aliases=["delete"])
@@ -590,6 +659,40 @@ class Components(commands.Cog):
 
     @commands.guild_only()
     @is_guild_moderator()
+    @selectmenu_option_group.command(name="value")
+    async def selectmenu_option_value_command(self, ctx: Context, message: discord.Message, menu_id: str, *, label: str):
+        """
+        Changes the value for a particular menu option
+        """
+
+        try:
+            value = await ctx.prompt_string(Embed(description="Input the value to use for the option"), timeout=45)
+        except PromptTimedout as e:
+            return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
+    
+        # edit menu
+        components = await self.fetch_all_components(message)
+
+        def setter(menu: SelectMenu) -> SelectMenu:
+            for i, option in enumerate(menu.options):
+                if option.label == label:
+                    menu.options[i].value = value
+                    break
+
+            return menu
+        
+        components = self.update_menu(components, menu_id, setter)
+
+        await message.edit(
+            content=message.content,
+            embed=message.embeds[0] if message.embeds else None,
+            components=components
+        )
+
+        await ctx.reply_success("Menu option value updated")
+
+    @commands.guild_only()
+    @is_guild_moderator()
     @selectmenu_option_group.command(name="description", aliases=["desc"])
     async def selectmenu_option_description_command(self, ctx: Context, message: discord.Message, menu_id: str, *, label: str):
         """
@@ -597,9 +700,6 @@ class Components(commands.Cog):
         """
 
         # prompt new description
-        def check(msg: discord.Message) -> bool:
-            return msg.author.id == ctx.author.id and msg.channel.id == ctx.channel.id and msg.content
-
         try:
             description = await ctx.prompt_string(Embed(description="Input the description to use for the option"), timeout=45)
         except PromptTimedout as e:
@@ -633,10 +733,6 @@ class Components(commands.Cog):
         """
         Changes the label of a particular menu option
         """
-
-        # prompt new label
-        def check(msg: discord.Message) -> bool:
-            return msg.author.id == ctx.author.id and msg.channel.id == ctx.channel.id and msg.content
 
         try:
             new_label = await ctx.prompt_string(Embed(description="Input the label to use for the option"), timeout=45)
@@ -814,7 +910,7 @@ class Components(commands.Cog):
     async def selectmenu_selectrange_command(
         self,
         ctx: Context,
-        message: discord.PartialMessage,
+        message: discord.Message,
         menu_id: str,
         minimum: int,
         maximum: RangedInteger(minimum=1, maximum=25)
@@ -1118,7 +1214,7 @@ class Components(commands.Cog):
         
         if ctx.invoked_subcommand is None:
             await ctx.send_help(self.button_group)
-    
+
     @commands.guild_only()
     @is_guild_moderator()
     @button_group.command(name="add")
@@ -1127,7 +1223,76 @@ class Components(commands.Cog):
         Adds a new button to a message
         """
 
-        pass
+        # link buttons do not contain a custom id, so only
+        # prompt a custom id for non-link buttons
+        if button_type is not ButtonType.link:
+            url = None
+
+            try:
+                custom_id = await ctx.prompt_string(Embed(description="Input the custom ID for the button"), timeout=30)
+            except PromptTimedout as e:
+                return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
+        else:
+            # prompt the url instead
+            # TODO: make a URL converter
+            custom_id = None
+
+            try:
+                url = await ctx.prompt_string(Embed(description="Input the url for the button"), timeout=30)
+            except PromptTimedout as e:
+                return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
+
+        if message:
+            action = message.edit
+            content = message.content if message.content else "I'm a button!"
+            components = await self.fetch_all_components(message)
+
+            # figure out where to place the button
+            # NOTE: this algorithm places the button in the first
+            # suitable spot
+            placed = False
+            for i, component in enumerate(components):
+                if isinstance(component, ActionRow):
+                    # check if the action row is holding a button and if it has space
+                    if any(isinstance(comp, Button) for comp in component.components) and len(component.components) < 5:
+                        component.add_button(
+                            style=button_type.value,
+                            label=label,
+                            custom_id=custom_id,
+                            url=url
+                        )
+
+                        components[i] = component
+                        placed = True
+            
+            # try to make another action row instead
+            if not placed:
+                count = 0
+                for component in components:
+                    if isinstance(component, ActionRow):
+                        count += 1
+                
+                if count < 5:
+                    # add another action row
+                    components.append(ActionRow(Button(
+                        style=button_type.value,
+                        label=label,
+                        custom_id=custom_id,
+                        url=url
+                    )))
+                else:
+                    return await ctx.reply_fail("Could not add another button to that message")
+        else:
+            action = ctx.send
+            content = "I'm a button!"
+            components = [Button(
+                style=button_type.value,
+                label=label,
+                custom_id=custom_id,
+                url=url
+            )]
+
+        await action(content=content, components=components)
 
     @commands.guild_only()
     @is_guild_moderator()
@@ -1209,16 +1374,97 @@ class Components(commands.Cog):
 
         if ctx.invoked_subcommand is None:
             await ctx.send_help(self.button_actions_group)
-    
+
+    def __remove_all_dict_keys_except(self, d: dict, key: Any) -> dict:
+        # no, you cannot just iterate over each dict key and delete it on the fly
+        # python gets very angry at you and raises a RuntimeError if you try to do that
+
+        data = d
+        to_remove = []
+        for k in data.keys():
+            if k != key:
+                to_remove.append(k)
+        
+        # now we can actually delete the keys
+        for k in to_remove:
+            del data[k]
+
+        return data
+
+    def __clean_embed_dict(self, d: dict) -> dict:
+        """Returns a "cleaned" embed dictionary object
+        
+        This needs to take place when we download embeds due to discord.py appending additional data
+        in the embed's dictionary
+
+        Parameters
+        ----------
+        d : dict
+            The embed dictionary from `discord.Embed.to_dict()`
+        
+        Returns
+        -------
+        The given embed dict, without the garbage stuff
+        """
+
+        if d.get("thumbnail"):
+            d["thumbnail"] = self.__remove_all_dict_keys_except(d["thumbnail"], "url")
+
+        d.pop("type")
+
+        return d
+
+    def get_message_json(self, message: discord.Message) -> dict:
+        data = {
+            "content": message.content if message.content != "" else None,
+            "embeds": None
+        }
+
+        for embed in message.embeds:
+            if data["embeds"] is None:
+                data["embeds"] = []
+
+            # we need to do some cleanup, since discord.py
+            # includes additional information in the embed dict
+            embed_data = self.__clean_embed_dict(embed.to_dict())
+
+            data["embeds"].append(embed_data)
+        
+        return data
+
     @commands.guild_only()
     @is_guild_moderator()
     @button_actions_group.command(name="set")
-    async def button_actions_set_command(self, ctx: Context):
+    async def button_actions_set_command(self, ctx: Context, message: discord.Message, button_id: str, action: ComponentAction, order: int):
         """
         Sets the action of a button
         """
 
-        pass
+        data = {
+            "version": 1,
+            "type": action.value
+        }
+
+        if action is ComponentAction.send_followup or action is ComponentAction.send_message:
+            while True:
+                try:
+                    arg = await ctx.prompt_string(Embed(description="Input the url to the source message to use for the message data"), timeout=30)
+                    source_message = await commands.MessageConverter().convert(ctx, arg)
+                    data["message"] = json.dumps(self.get_message_json(source_message))
+                    break
+                except commands.MessageNotFound:
+                    await ctx.reply_fail("No message found")
+                except PromptTimedout as e:
+                    return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
+        
+        json_data = json.dumps(data)
+
+        await self.bot.database.execute(
+            "INSERT INTO button_actions VALUES (?, ?, ?, ?, ?, ?)",
+            parameters=(ctx.guild.id, ctx.channel.id, source_message.id, button_id, json_data, order)
+        )
+
+        await ctx.send(f"Set button action `{action.name}` on click", file=discord.File(io.StringIO(json_data), filename="action_data.json"))
 
     @commands.guild_only()
     @is_guild_moderator()
