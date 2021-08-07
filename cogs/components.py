@@ -146,6 +146,7 @@ class ContentVisibility(NameConvertibleEnum):
     hidden = 0
     visible = 1
 
+
 class Components(commands.Cog):
     """
     Commands for testing components
@@ -864,7 +865,7 @@ class Components(commands.Cog):
         message: discord.Message,
         menu_id: str,
         minimum: int,
-        maximum: RangedInteger(minimum=1, maximum=25)
+        maximum: int
     ):
         """
         Sets the number of selections that can be made on a menu
@@ -886,7 +887,6 @@ class Components(commands.Cog):
         )
 
         await ctx.reply_success("Menu updated")
-
 
     @commands.guild_only()
     @is_guild_moderator()
