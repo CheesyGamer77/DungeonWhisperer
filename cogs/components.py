@@ -146,19 +146,6 @@ class ContentVisibility(NameConvertibleEnum):
     hidden = 0
     visible = 1
 
-
-class IntegerRequired(ConversionFailed):
-    pass
-
-
-class RangeConstraintFailure(ConversionFailed):
-    def __init__(self, argument: int, minimum: int, maximum: int, *args, **kwargs):
-        super().__init__(*args, *kwargs)
-        self.arument = argument
-        self.minumum = minimum
-        self.maximum = maximum
-
-
 class Components(commands.Cog):
     """
     Commands for testing components
@@ -229,42 +216,6 @@ class Components(commands.Cog):
             return components
 
         return raw_components  # empty list
-
-    def update_button(self, components: List[Component], button_id: str, setter: Callable[[Button], Button]) -> List[Component]:
-        """Updates a button contained within a component list, and returns the updated list.
-
-        Action Rows are walked through and updated automatically
-
-        Parameters
-        ----------
-        components : List[Component]
-            The list of components to search through
-        button_id : str
-            The custom ID of the button to update
-        setter : Callable[Button]->Button
-            The setter function to execute on the button. This callable should take
-            one parameter - the button to update - and return the updated button
-        
-        Returns
-        -------
-        The updated list of components
-        """
-
-        for i, component in enumerate(components):
-            if isinstance(component, ActionRow):
-                # walk through the action row's components and update as well
-                for j, inner_component in enumerate(component.components):                    
-                    if isinstance(inner_component, Button) and inner_component.custom_id == button_id:
-                        inner_component = setter(inner_component)
-                        component.components[j] = inner_component
-                        components[i] = component
-                        return components
-            elif isinstance(component, Button) and component.custom_id == button_id:
-                component = setter(component)
-                components[i] = component
-                return components
-            
-        return components
 
     def update_menu(self, components: List[Component], menu_id: str, setter: Callable[[SelectMenu], SelectMenu]) -> List[Component]:
         """Updates a menu contained within a component list, and returns the updated list.
