@@ -1431,7 +1431,7 @@ class Components(commands.Cog):
 
         await self.bot.database.execute(
             "INSERT INTO button_actions VALUES (?, ?, ?, ?, ?, ?)",
-            parameters=(ctx.guild.id, ctx.channel.id, source_message.id, button_id, json_data, order)
+            parameters=(ctx.guild.id, message.channel.id, message.id, button_id, json_data, order)
         )
 
         await ctx.send(f"Set button action `{action.name}` on click", file=discord.File(io.StringIO(json_data), filename="action_data.json"))
