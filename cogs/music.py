@@ -340,9 +340,9 @@ class Music(commands.Cog):
         
         self.logger.debug("Searching in %s for track named %s", root, name)
         for item in os.listdir(root):
-            # audio tracks typically have a track number prepended to the file name
+            # audio tracks typically have a zero-padded track number prepended to the file name
             # this is formatted as `xx_...`
-            # this also strips out the `.mp3` file extension
+            # this strips out the track number and the `.mp3` file extension
             item_name = item[3:][:-4]
             # self.logger.debug(f"Found item named {item_name!r}")
 
@@ -443,7 +443,7 @@ class Music(commands.Cog):
                 if voice_client:
                     self._play_track(ctx, voice_client, self.get_next_track())
                 else:
-                    self.logger.info(f"Missing voice client for guild {ctx.guild.id}")        
+                    self.logger.warning(f"Missing voice client for guild {ctx.guild.id}")        
         
         # edit the embed and start playing
         asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed), loop=self.bot.loop)
