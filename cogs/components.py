@@ -602,7 +602,7 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @selectmenu_option_group.command(name="remove", aliases=["delete"])
-    async def selectmenu_option_delete_command(self, ctx: Context, *, label: str):
+    async def selectmenu_option_remove_command(self, ctx: Context, *, label: str):
         """
         Removes a select menu option with a particular label
         """
@@ -1327,7 +1327,7 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @button_group.command(name="enable")
-    async def button_disable_command(self, ctx: Context):
+    async def button_enable_command(self, ctx: Context):
         """
         Enables a button
         """
@@ -1449,7 +1449,7 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @button_actions_group.command(name="remove")
-    async def button_actions_remove(self, ctx: Context):
+    async def button_actions_remove_command(self, ctx: Context):
         """
         Removes an action from a button
         """
