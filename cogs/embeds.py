@@ -149,13 +149,31 @@ class Embeds(commands.Cog):
     
     @commands.guild_only()
     @is_guild_moderator()
+    @commands.command(name="download_multi", hidden=True)
+    async def download_multi_command(self, ctx: Context, messages: commands.Greedy[discord.Message], filename: Optional[str]):
+        """
+        Generates a JSON file given a link to one or more messages
+
+        This *does not* include message attachments
+        """
+
+        pass
+
+    @commands.guild_only()
+    @is_guild_moderator()
     @commands.command(name="download")
-    async def download_command(self, ctx: Context, message: discord.Message):
+    async def download_command(self, ctx: Context, message: discord.Message, filename: Optional[str]):
         """
         Generates a JSON file given a link to a message containing embeds
 
         This *does not* include message attachments
         """
+
+        if not filename:
+            filename="message_json"
+        
+        if not filename.endswith(".json"):
+            filename += ".json"
 
         data = {
             "content": message.content if message.content != "" else None,
@@ -175,7 +193,7 @@ class Embeds(commands.Cog):
         await ctx.send(
             file=discord.File(
                 StringIO(json.dumps(data, indent=4)),
-                filename="message_json.json"
+                filename=filename
             )
         )
         
