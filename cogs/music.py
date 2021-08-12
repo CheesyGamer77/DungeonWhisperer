@@ -446,8 +446,11 @@ class Music(commands.Cog):
                     self.logger.warning(f"Missing voice client for guild {ctx.guild.id}")        
         
         # edit the embed and start playing
-        asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed), loop=self.bot.loop)
-        voice_client.play(discord.PCMVolumeTransformer(track.source), after=after_playing)
+        try:
+            asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed), loop=self.bot.loop)
+            voice_client.play(discord.PCMVolumeTransformer(track.source), after=after_playing)
+        except Exception as err:
+            self.logger.exception(f"Error occured while playing track {track.title!r} in guild {ctx.guild.id}: {err.__class__.__name__}.")
 
     @is_guild_moderator()
     @commands.command(name="play", aliases=["p"])
@@ -464,7 +467,10 @@ class Music(commands.Cog):
             voice_client = await voice_channel.connect()
 
         if voice_client and not voice_client.is_playing():
-            self._play_track(ctx, voice_client, self.get_next_track())
+            try:
+                self._play_track(ctx, voice_client, self.get_next_track())
+            except Exception as err:
+                self.logger.exception(f"Error occured in play command in guild {ctx.guild.id}: {err.__class__.__name__}.")
 
     @is_guild_moderator()
     @commands.command(name="stop")
