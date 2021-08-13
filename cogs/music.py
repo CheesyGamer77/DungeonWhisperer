@@ -163,6 +163,22 @@ class Music(commands.Cog):
         self.logger.addHandler(handler)
 
     def _get_spotify_credentials_manager(self, fp: str="spotify_credentials.json") -> SpotifyClientCredentials:
+        """Gets a `SpotifyClientCredentials` object from a given JSON file containing Spotifty credentials
+
+        The JSON file is expected to contain the following keys:
+        - `client_id`
+        - `client_secret`
+
+        Parameters
+        ----------
+        fp : str
+            The path-like string designating the JSON file to read and extract Spotify credentials from
+        
+        Returns
+        -------
+        A `SpotifyClientCredentials` object with the respective credentials
+        """
+        
         data = json.load(open(fp, "r"))
         return SpotifyClientCredentials(
             client_id=data["client_id"],
@@ -170,10 +186,37 @@ class Music(commands.Cog):
         )
 
     def get_spotify_album(self, album_url: str) -> dict:
+        """Returns a `dict` representing raw album data from Spotify
+
+        NOTE: Spotify paginates album tracks for albums with more than 50 tracks. If an album's tracks are paginated, the `tracks`
+        list will contain a `next` key, which contains a url that you can pass into your `Spotify`'s `next` method in order to get
+        the rest of the tracks.
+
+        TODO: In the future, for our use case we could just retrieve paginated results automatically
+
+        Parameters
+        ----------
+        album_url : str
+            The url for the album to retrieve the data of
+        """
+        
         client = spotipy.Spotify(client_credentials_manager=self._get_spotify_credentials_manager())
         return client.album(album_url)
 
     async def retrieve_radio_text_channel(self, guild: discord.Guild) -> Optional[discord.TextChannel]:
+        """Retrieves the radio text channel for a particular guild or returns
+        `None` if the channel isn't found/set
+
+        Parameters
+        ----------
+        guild : discord.Guild
+            The guild to retrieve the channel for
+
+        Returns
+        -------
+        A `discord.TextChannel` if the channel was found, else `None`
+        """
+        
         row = await self.bot.database.query_first(
             "SELECT radio_text_channel_id FROM config WHERE server_id = ?",
             parameters=(guild.id,)
@@ -189,7 +232,22 @@ class Music(commands.Cog):
         
         return None
     
-    async def retrieve_radio_message(self, guild: discord.Guild) -> Optional[discord.VoiceChannel]:
+    async def retrieve_radio_message(self, guild: discord.Guild) -> Optional[discord.Message]:
+        """Retrieves the radio message for a particular guild
+        or returns `None` if the radio message isn't found
+
+        TODO: Implement caching for the messages
+
+        Parameters
+        ----------
+        guild : discord.Guild
+            The guild to retrieve the radio message for
+
+        Returns
+        -------
+        A `discord.Message` for the radio message if it exists, else `None`
+        """
+
         # we first need to retrieve the radio text channel
 
         text_channel = await self.retrieve_radio_text_channel(guild)
@@ -212,6 +270,13 @@ class Music(commands.Cog):
 
     @property
     def default_base_embed(self) -> Embed:
+        """Returns the default "Now Playing" embed
+
+        Returns
+        -------
+        The default `Embed`
+        """
+        
         return Embed(
             color=discord.Color.from_rgb(162, 162, 162)
         ).set_thumbnail(
@@ -311,7 +376,21 @@ class Music(commands.Cog):
         
         await ctx.send(file=discord.File(StringIO(json.dumps(data, indent=4)), filename="album.json"))
         
-    def get_duration_string(self, ms: int):
+    @staticmethod
+    def get_duration_string(ms: int) -> str:
+        """Returns a string converting miliseconds to a human readable
+        duration string
+
+        Parameters
+        ----------
+        ms : int
+            The ammount of miliseconds to convert
+        
+        Returns
+        -------
+        A `str` for the duration string
+        """
+        
         minutes = int((ms / 1000) / 60)
         seconds = int((ms / 1000) % 60)
 
@@ -429,6 +508,21 @@ class Music(commands.Cog):
                 self.logger.error(f"Attempt to set new radio message failed for guild {ctx.guild.id}, channel {ctx.channel.id}")
 
     def _play_track(self, ctx: Context, voice_client: discord.VoiceClient, track: MusicTrackProxy):
+        """Main function to play music tracks in a particular guild
+
+        TODO: This method has always been super finicky. Oftentimes the bot disconnects from VC on it's own,
+        and the error logging for such issues is.. subpar
+
+        Parameters
+        ----------
+        ctx : Context
+            The original play command invokation context
+        voice_client : discord.VoiceClient
+            The voice client to use for playing music
+        track : MusicTrackProxy
+            The dataclass containing the data for the track to play
+        """
+
         self.logger.debug(f"Playing track {track.title!r} in guild {ctx.guild.id}, channel {voice_client.channel.id}")
 
         def after_playing(error: Optional[Exception]):
@@ -493,7 +587,6 @@ class Music(commands.Cog):
             await voice_client.disconnect()
             await self.modify_radio_message(ctx, embed=embed)
         
-
 
 def setup(bot: DiscordBot):
     bot.add_cog(Music(bot))
