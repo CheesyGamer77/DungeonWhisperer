@@ -119,7 +119,7 @@ class MusicTrackProxy:
             value=f"By {', '.join([artist for artist in self.artists])} | Duration: {self.duration}\nTrack {track_number} of the {self.island_realm} album",
             inline=False
         ).add_field(
-            name="**Music URLs**",
+            name="**Music Linkss**",
             value="\n".join([f"{item['emoji']} [Track {track_number}]({item['track_url']}) **|** [Album]({item['album_url']})" for key, item in urls.items()])
         )
 
