@@ -4,7 +4,6 @@ import io
 import json
 import logging
 from cheesyutils.discord_bots import DiscordBot, Context, Embed, is_guild_moderator, PromptTimedout
-from cheesyutils.discord_bots.converters import RangedInteger
 from cheesyutils.discord_bots.types import NameConvertibleEnum
 from discord.ext import commands
 from enum import Enum
@@ -217,6 +216,23 @@ class Components(commands.Cog):
             return components
 
         return raw_components  # empty list
+
+    def update_button(self, components: List[Component], button_id: str, setter: Callable[[Button], Button]) -> List[Component]:
+        for i, component in enumerate(components):
+            if isinstance(component, ActionRow):
+                # walk through the action row's components and update as well
+                for j, inner_component in enumerate(component.components):                    
+                    if isinstance(inner_component, Button) and inner_component.custom_id == button_id:
+                        inner_component = setter(inner_component)
+                        component.components[j] = inner_component
+                        components[i] = component
+                        return components
+            elif isinstance(component, Button) and component.custom_id == button_id:
+                component = setter(component)
+                components[i] = component
+                return components
+            
+        return components
 
     def update_menu(self, components: List[Component], menu_id: str, setter: Callable[[SelectMenu], SelectMenu]) -> List[Component]:
         """Updates a menu contained within a component list, and returns the updated list.
@@ -646,7 +662,7 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @selectmenu_option_group.command(name="description", aliases=["desc"])
-    async def selectmenu_option_description_command(self, ctx: Context, message: discord.Message, menu_id: str, *, label: str):
+    async def selectmenu_option_description_command(self, ctx: Context, message: discord.Message, menu_id: str, *, option_label: str):
         """
         Changes the description of a particular menu option
         """
@@ -662,7 +678,7 @@ class Components(commands.Cog):
 
         def setter(menu: SelectMenu) -> SelectMenu:
             for i, option in enumerate(menu.options):
-                if option.label == label:
+                if option.label == option_label:
                     menu.options[i].description = description
                     break
 
@@ -681,7 +697,7 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @selectmenu_option_group.command(name="rename", aliases=["label"])
-    async def selectmenu_option_rename_command(self, ctx: Context, message: discord.Message, menu_id: str, *, label: str):
+    async def selectmenu_option_rename_command(self, ctx: Context, message: discord.Message, menu_id: str, *, option_label: str):
         """
         Changes the label of a particular menu option
         """
@@ -696,7 +712,7 @@ class Components(commands.Cog):
 
         def setter(menu: SelectMenu) -> SelectMenu:
             for i, option in enumerate(menu.options):
-                if option.label == label:
+                if option.label == option_label:
                     menu.options[i].label = new_label
                     break
 
@@ -714,13 +730,78 @@ class Components(commands.Cog):
 
     @commands.guild_only()
     @is_guild_moderator()
-    @selectmenu_option_group.command(name="emoji")
-    async def selectmenu_option_emoji_command(self, ctx: Context, label: str, new_emoji: discord.PartialEmoji):
+    @selectmenu_option_group.group(name="emoji", aliases=["emojis"])
+    async def selectmenu_option_emoji_group(self, ctx: Context):
         """
-        Changes the emoji of a particular menu option
+        Commands for changing the emoji of a particular menu option
         """
 
-        pass
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help(self.selectmenu_option_emoji_group)
+    
+    @commands.guild_only()
+    @is_guild_moderator()
+    @selectmenu_option_emoji_group.group(name="set", aliases=["add"])
+    async def selectmenu_option_emoji_set_command(self, ctx: Context, message: discord.Message, menu_id: str, *, option_label: str):
+        """
+        Sets the emoji for a particular menu option
+        """
+
+        components = await self.fetch_all_components(message)
+
+        try:
+            emoji_str = await ctx.prompt_string(Embed(description="Input the emoji to use for the option"), timeout=30)
+            emoji = await commands.PartialEmojiConverter().convert(ctx, emoji_str)
+        except commands.PartialEmojiConversionFailure:
+            emoji = emoji_str
+        except PromptTimedout as err:
+            return await ctx.reply_fail(f"Prompt timed out after {err.timeout} seconds, try again")
+
+        def setter(menu: SelectMenu) -> SelectMenu:
+            for i, option in enumerate(menu.options):
+                if option.label == option_label:
+                    menu.options[i].emoji = emoji
+                    break
+
+            return menu
+        
+        components = self.update_menu(components, menu_id, setter)
+
+        await message.edit(
+            content=message.content,
+            embed=message.embeds[0] if message.embeds else None,
+            components=components
+        )
+
+        await ctx.reply_success("Option emoji set")
+    
+    @commands.guild_only()
+    @is_guild_moderator()
+    @selectmenu_option_emoji_group.group(name="clear", aliases=["remove", "delete"])
+    async def selectmenu_option_emoji_clear_command(self, ctx: Context, message: discord.Message, menu_id: str, *, option_label: str):
+        """
+        Removes the emoji for a particular menu option
+        """
+
+        components = await self.fetch_all_components(message)
+
+        def setter(menu: SelectMenu) -> SelectMenu:
+            for i, option in enumerate(menu.options):
+                if option.label == option_label:
+                    menu.options[i].emoji = None
+                    break
+
+            return menu
+        
+        components = self.update_menu(components, menu_id, setter)
+
+        await message.edit(
+            content=message.content,
+            embed=message.embeds[0] if message.embeds else None,
+            components=components
+        )
+
+        await ctx.reply_success("Option emoji cleared")
 
     @commands.guild_only()
     @is_guild_moderator()
@@ -1258,6 +1339,65 @@ class Components(commands.Cog):
 
     @commands.guild_only()
     @is_guild_moderator()
+    @button_group.group(name="emoji", aliases=["emojis"])
+    async def button_emoji_group(self, ctx: Context):
+        """
+        Commands for modifying emojis on buttons
+        """
+
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help(self.button_emoji_group)
+
+    @commands.guild_only()
+    @is_guild_moderator()
+    @button_emoji_group.command(name="set", aliases=["add", "edit"])
+    async def button_emoji_set_command(self, ctx: Context, message: discord.Message, button_id: str, emoji: Union[discord.PartialEmoji, str]):
+        """
+        Sets the emoji for a button
+        """
+
+        components = await self.fetch_all_components(message)
+
+        def setter(button: Button) -> Button:
+            button.emoji = emoji
+            return button
+        
+        components = self.update_button(components, button_id, setter)
+
+        await message.edit(
+            content=message.content,
+            embed=message.embeds[0] if message.embeds else None,
+            components=components
+        )
+        
+        await ctx.reply_success("Button emoji set")
+    
+    @commands.guild_only()
+    @is_guild_moderator()
+    @button_emoji_group.command(name="clear", aliases=["remove", "delete"])
+    async def button_emoji_clear_command(self, ctx: Context, message: discord.Message, button_id: str):
+        """
+        Removes the emoji for a button
+        """
+
+        components = await self.fetch_all_components(message)
+
+        def setter(button: Button) -> Button:
+            button.emoji = None
+            return button
+        
+        components = self.update_button(components, button_id, setter)
+
+        await message.edit(
+            content=message.content,
+            embed=message.embeds[0] if message.embeds else None,
+            components=components
+        )
+        
+        await ctx.reply_success("Button emoji cleared")
+
+    @commands.guild_only()
+    @is_guild_moderator()
     @button_group.command(name="info")
     async def button_info_command(self, ctx: Context):
         """
@@ -1296,7 +1436,7 @@ class Components(commands.Cog):
 
     @commands.guild_only()
     @is_guild_moderator()
-    @button_group.command(name="rename")
+    @button_group.command(name="rename", aliases=["label"])
     async def button_rename_command(self, ctx: Context):
         """
         Changes the label of a button
