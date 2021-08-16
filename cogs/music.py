@@ -529,6 +529,7 @@ class Music(commands.Cog):
             voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
 
             try:
+                self.logger.debug(f"Checking error after playing: {error}")
                 if error:
                     raise error
             except Exception as err:
@@ -543,6 +544,7 @@ class Music(commands.Cog):
         try:
             asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed), loop=self.bot.loop)
             voice_client.play(discord.PCMVolumeTransformer(track.source), after=after_playing)
+            self.logger.error("WE SHOULD NOT HAVE REACHED HERE!!!")
         except Exception as err:
             self.logger.exception(f"Error occured while playing track {track.title!r} in guild {ctx.guild.id}: {err.__class__.__name__}.")
 
