@@ -181,6 +181,24 @@ class Components(commands.Cog):
             else:
                 yield component
 
+    @staticmethod
+    async def set_message_components(message: discord.Message, components: List[Component]):
+        """Sets a message's list of components
+        
+        Parameters
+        ----------
+        message : discord.Message
+            The message to edit
+        components: List[Component]
+            The list of components to set for the message
+        """
+
+        await message.edit(
+            content=message.content,
+            embed=message.embeds[0] if message.embeds else None,
+            components=components
+        )
+
     async def fetch_all_components(self, message: Union[discord.Message, discord.PartialMessage]) -> List[Component]:
         """Fetches all components from a message, including Action Rows
         
@@ -217,43 +235,61 @@ class Components(commands.Cog):
 
         return raw_components  # empty list
 
-    def update_button(self, components: List[Component], button_id: str, setter: Callable[[Button], Button]) -> List[Component]:
-        for i, component in enumerate(components):
-            if isinstance(component, ActionRow):
-                # walk through the action row's components and update as well
-                for j, inner_component in enumerate(component.components):                    
-                    if isinstance(inner_component, Button) and inner_component.custom_id == button_id:
-                        inner_component = setter(inner_component)
-                        component.components[j] = inner_component
-                        components[i] = component
-                        return components
-            elif isinstance(component, Button) and component.custom_id == button_id:
-                component = setter(component)
-                components[i] = component
-                return components
-            
-        return components
-
-    def update_menu(self, components: List[Component], menu_id: str, setter: Callable[[SelectMenu], SelectMenu]) -> List[Component]:
-        """Updates a menu contained within a component list, and returns the updated list.
-
+    @staticmethod
+    def update_component(components: List[Component], component_id_or_label: str, setter: Callable[[Component], Component]) -> List[Component]:
+        """Updates a component contained within `components`, and returns the updated list
+        
         Action Rows are walked through and updated automatically
 
         Parameters
         ----------
         components : List[Component]
-            The list of components to search through
-        menu_id : str
-            The custom ID of the menu to update
-        setter : Callable[SelectMenu]->SelectMenu
-            The setter function to execute on the menu. This callable should take
-            one parameter - the menu to update - and return the updated menu
+            The list of components to update
+        component_id_or_label : str
+            The ID or label of the component to update.
+            For updating menus, you should always supply the menu ID.
+            For buttons, you should always supply the button's label.
+            This is because link buttons are unique and do not have a custom_id associated with them.
+        setter : Callable[Component]->Component
+            The setter function to execute on the component to update. This callable
+            should take one parameter (the component to update) and return the updated component.
         
         Returns
         -------
-        The updated list of components
+        The updated `list` of `Component`s
         """
+        
+        def _do_update_inner(cmpts: List[Component], outer_index: int, inner_index: int, setter: Callable[[Component], Component]) -> List[Component]:
+            """Helper function that updates a component within an action row"""
 
+            cmpts[outer_index].components[inner_index] = setter(cmpts[outer_index].components[inner_index])
+            return cmpts
+
+        def _do_update_outer(cmpts: List[Component], index: int, setter: Callable[[Component], Component]) -> List[Component]:
+            cmpts[index] = setter(cmpts[index])
+            return cmpts
+
+        for i, component in enumerate(components):
+            if isinstance(component, ActionRow):
+                # walk through the action row's components and update as well
+                for j, inner_component in enumerate(component.components):        
+                    if isinstance(inner_component, Button) and inner_component.label == component_id_or_label:
+                        # link buttons don't have a custom id, so update the button based off
+                        # of the button's label instead
+                        return _do_update_inner(components, i, j, setter)
+                    elif isinstance(inner_component, SelectMenu) and inner_component.custom_id == component_id_or_label:
+                        # this is just a select menu, which always has a
+                        # custom_id, so proceed with usual updates
+                        return _do_update_inner(component, i, j, setter)
+            elif isinstance(component, Button) and component.label == component_id_or_label:
+                return _do_update_outer(components, i, setter)
+            elif isinstance(component, SelectMenu) and component.custom_id == component_id_or_label:
+                return _do_update_outer(components, i, setter)
+            
+        return components
+
+    """
+    def update_menu(self, components: List[Component], menu_id: str, setter: Callable[[SelectMenu], SelectMenu]) -> List[Component]:
         for i, component in enumerate(components):
             if isinstance(component, ActionRow):
                 # walk through the action row's components and update as well
@@ -269,6 +305,7 @@ class Components(commands.Cog):
                 return components
             
         return components
+    """
     
     @commands.Cog.listener()
     async def on_button_click(self, interaction: MessageInteraction):
@@ -495,17 +532,30 @@ class Components(commands.Cog):
                 )
             )
             return menu
-        
-        components = self.update_menu(components, menu_id, setter)
 
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))       
         await ctx.reply_success("Menu option added")
     
+    @commands.guild_only()
+    @is_guild_moderator()
+    @selectmenu_option_group.command(name="remove", aliases=["delete"])
+    async def selectmenu_option_remove_command(self, ctx: Context, message: discord.Message, menu_id: str, *, option_label: str):
+        """
+        Removes a select menu option with a particular label
+        """
+
+        components = await self.fetch_all_components(message)
+
+        def setter(menu: SelectMenu) -> SelectMenu:
+            for i, option in enumerate(menu.options):
+                if option.label == option_label:
+                    del menu.options[i]
+                    break
+
+            return menu
+            
+            
+
     @commands.guild_only()
     @is_guild_moderator()
     @selectmenu_option_group.group(name="actions", aliases=["action", "acts", "act"])
@@ -613,17 +663,7 @@ class Components(commands.Cog):
             parameters=(ctx.guild.id, message.channel.id, message.id, menu_id, option.label, json_data, order, event.value)
         )
 
-        await ctx.send(f"Set option action `{action.name}` on event `{event.name}`", file=discord.File(io.StringIO(json_data), "action_data.json"))
-
-    @commands.guild_only()
-    @is_guild_moderator()
-    @selectmenu_option_group.command(name="remove", aliases=["delete"])
-    async def selectmenu_option_remove_command(self, ctx: Context, *, label: str):
-        """
-        Removes a select menu option with a particular label
-        """
-
-        pass
+        await ctx.send(f"Set option action `{action.name}` on event `{event.name}`", file=discord.File(io.StringIO(json_data), "action_data.json"))            
 
     @commands.guild_only()
     @is_guild_moderator()
@@ -649,14 +689,7 @@ class Components(commands.Cog):
 
             return menu
         
-        components = self.update_menu(components, menu_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))
         await ctx.reply_success("Menu option value updated")
 
     @commands.guild_only()
@@ -684,14 +717,7 @@ class Components(commands.Cog):
 
             return menu
         
-        components = self.update_menu(components, menu_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))
         await ctx.reply_success("Menu option description updated")
 
     @commands.guild_only()
@@ -718,14 +744,7 @@ class Components(commands.Cog):
 
             return menu
         
-        components = self.update_menu(components, menu_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))
         await ctx.reply_success("Menu option label updated")
 
     @commands.guild_only()
@@ -765,14 +784,7 @@ class Components(commands.Cog):
 
             return menu
         
-        components = self.update_menu(components, menu_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))
         await ctx.reply_success("Option emoji set")
     
     @commands.guild_only()
@@ -793,14 +805,7 @@ class Components(commands.Cog):
 
             return menu
         
-        components = self.update_menu(components, menu_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))
         await ctx.reply_success("Option emoji cleared")
 
     @commands.guild_only()
@@ -902,14 +907,7 @@ class Components(commands.Cog):
             menu.custom_id = new_id
             return menu
         
-        components = self.update_menu(components, menu_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))
         await ctx.reply_success("Menu ID renamed")
 
 
@@ -927,13 +925,7 @@ class Components(commands.Cog):
             menu.placeholder = new_placeholder
             return menu
 
-        components = self.update_menu(components, menu_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))
 
         await ctx.reply_success("Menu updated")
 
@@ -959,14 +951,7 @@ class Components(commands.Cog):
             menu.max_values = maximum
             return menu
 
-        components = self.update_menu(components, menu_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))
         await ctx.reply_success("Menu updated")
 
     @commands.guild_only()
@@ -983,14 +968,7 @@ class Components(commands.Cog):
             menu.disabled = True
             return menu
         
-        components = self.update_menu(components, menu_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))
         await ctx.reply_success("Menu updated")
 
     @commands.guild_only()
@@ -1007,13 +985,7 @@ class Components(commands.Cog):
             menu.disabled = False
             return menu
         
-        components = self.update_menu(components, menu_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
+        await self.set_message_components(message, self.update_component(components, menu_id, setter))
 
         await ctx.reply_success("Menu updated")
 
@@ -1046,6 +1018,7 @@ class Components(commands.Cog):
             components = [menu]
 
         await action(content=content, components=components)
+        await ctx.reply_success("Menu added")
 
     @commands.guild_only()
     @commands.is_owner()
@@ -1362,14 +1335,7 @@ class Components(commands.Cog):
             button.emoji = emoji
             return button
         
-        components = self.update_button(components, button_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-        
+        await self.set_message_components(message, self.update_component(components, button_id, setter))
         await ctx.reply_success("Button emoji set")
     
     @commands.guild_only()
@@ -1386,14 +1352,7 @@ class Components(commands.Cog):
             button.emoji = None
             return button
         
-        components = self.update_button(components, button_id, setter)
-
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-        
+        await self.set_message_components(message, self.update_component(components, button_id, setter))
         await ctx.reply_success("Button emoji cleared")
 
     @commands.guild_only()
@@ -1426,30 +1385,39 @@ class Components(commands.Cog):
                 del components[i]
                 break
         
-        await message.edit(
-            content=message.content,
-            embed=message.embeds[0] if message.embeds else None,
-            components=components
-        )
-
+        await self.set_message_components(message, components)
         await ctx.reply_success("Button removed")
 
     @commands.guild_only()
     @is_guild_moderator()
     @button_group.command(name="rename", aliases=["label"])
-    async def button_rename_command(self, ctx: Context):
+    async def button_rename_command(self, ctx: Context, message: discord.Message, button_id: str):
         """
         Changes the label of a button
         """
 
-        pass
+        try:
+            new_label = await ctx.prompt_string(Embed(description="Input the label to use for the button"), timeout=45)
+        except PromptTimedout as e:
+            return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
+
+        components = await self.fetch_all_components(message)
+
+        def setter(button: Button) -> Button:
+            button.label = new_label
+            return button
+        
+        await self.set_message_components(message, self.update_component(components, button_id, setter))
+        await ctx.reply_success("Button label updated")
 
     @commands.guild_only()
     @is_guild_moderator()
     @button_group.command(name="style")
     async def button_style_command(self, ctx: Context):
         """
-        Changes the style of a button
+        Changes the style of a button.
+
+        This can only be done for non-link buttons.
         """
 
         pass
@@ -1457,22 +1425,36 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @button_group.command(name="disable")
-    async def button_disable_command(self, ctx: Context):
+    async def button_disable_command(self, ctx: Context, message: discord.Message, button_id: str):
         """
         Disables a button
         """
 
-        pass
+        components = await self.fetch_all_components(message)
+
+        def setter(button: Button) -> Button:
+            button.disabled = True
+            return button
+        
+        await self.set_message_components(message, self.update_component(components, button_id, setter))
+        await ctx.reply_success("Button disabled")
 
     @commands.guild_only()
     @is_guild_moderator()
     @button_group.command(name="enable")
-    async def button_enable_command(self, ctx: Context):
+    async def button_enable_command(self, ctx: Context, message: discord.Message, button_id: str):
         """
         Enables a button
         """
 
-        pass
+        components = await self.fetch_all_components(message)
+
+        def setter(button: Button) -> Button:
+            button.disabled = False
+            return button
+        
+        await self.set_message_components(message, self.update_component(components, button_id, setter))
+        await ctx.reply_success("Button enabled")
 
     @commands.guild_only()
     @is_guild_moderator()
