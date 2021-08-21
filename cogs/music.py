@@ -183,7 +183,7 @@ class Music(commands.Cog):
 
         if before.channel and not after.channel:
             guild: discord.Guild = before.channel.guild
-            
+
             self.logger.info(f"DungeonWhisperer disconnected from voice channel {before.channel.id}, guild {guild.id}")
             
 
@@ -553,26 +553,23 @@ class Music(commands.Cog):
 
         def after_playing(error: Optional[Exception]):
             voice_client = discord.utils.get(self.bot.voice_clients, guild=ctx.guild)
-
-            try:
-                self.logger.debug(f"Checking error after playing: {error}")
-                if error:
-                    raise error
-            except Exception as err:
-                self.logger.exception(f"Error while playing track {track.title!r} in guild {ctx.guild.id}: {err.__class__.__name__}. Skipping track.")
-            finally:
-                if voice_client:
-                    self._play_track(ctx, voice_client, self.get_next_track())
-                else:
-                    self.logger.warning(f"Missing voice client for guild {ctx.guild.id}")        
+            
+            self.logger.debug(f"Checking error after playing: {error}")
+            if error:
+                raise error
+                
+            if voice_client:
+                self._play_track(ctx, voice_client, self.get_next_track())
+            else:
+                self.logger.warning(f"Missing voice client for guild {ctx.guild.id}")
         
         # edit the embed and start playing
         try:
             asyncio.run_coroutine_threadsafe(self.modify_radio_message(ctx, embed=track.embed), loop=self.bot.loop)
             voice_client.play(discord.PCMVolumeTransformer(track.source), after=after_playing)
-            self.logger.error("WE SHOULD NOT HAVE REACHED HERE!!!")
         except Exception as err:
-            self.logger.exception(f"Error occured while playing track {track.title!r} in guild {ctx.guild.id}: {err.__class__.__name__}.")
+            self.logger.exception(f"Error occured while playing track {track.title!r} in guild {ctx.guild.id}: {err.__class__.__name__}. Attempting to skip to next track...")
+            self._play_track(ctx, voice_client, self.get_next_track())
 
     @is_guild_moderator()
     @commands.command(name="play", aliases=["p"])
