@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from discord.ext import commands
 from io import StringIO
 from spotipy.oauth2 import SpotifyClientCredentials
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -124,30 +124,6 @@ class MusicTrackProxy:
         )
 
 
-def bot_has_voice_state(*, connected: bool = True, playing: bool = None, paused: bool = None):
-    """
-    A check that determines if the bot has a particular voice state
-
-    Parameters
-    ----------
-    connected : bool
-        Whether the bot should be connected to a voice channel.
-        This defaults to `True`.
-    playing : bool
-        Whether the bot should be currently playing audio.
-        This defaults to `None` (indifferent).
-    paused : bool
-        Whether the bot's playback should be paused.
-        This defaults to `None` (indifferent)
-    """
-
-    async def predicate(ctx: Context):
-        client: discord.VoiceClient = ctx.guild.voice_client
-        return client is not None
-    
-    return commands.check(predicate)
-
-
 class Music(commands.Cog):
     """
     Event listeners and commands for music
@@ -161,6 +137,15 @@ class Music(commands.Cog):
         handler = logging.FileHandler(filename="DungeonWhisperer.log", encoding="utf-8", mode="a")
         handler.setFormatter(logging.Formatter("%(asctime)s: [%(levelname)s]: (%(name)s): %(message)s"))
         self.logger.addHandler(handler)
+
+        # TEMPORARY - READ
+        # This bot has always had issues with it randomly disconnecting from voice for no apparent
+        # reason, and frankly I'm sick of this game of cat and mouse when my error logging should be
+        # catching exactly what's going on, but it isn't, and I don't know why.
+        # I'm pretty sure it's an FFMPEG issue, but until it's fixed, we have this.
+        # This list simply stores a list of guild IDs where a "proper" disconnect via the `stop` command
+        # is used, with such entries being near instantaniously removed
+        self.proper_disconnects: List[int] = []
 
     def _get_spotify_credentials_manager(self, fp: str="spotify_credentials.json") -> SpotifyClientCredentials:
         """Gets a `SpotifyClientCredentials` object from a given JSON file containing Spotifty credentials
@@ -184,6 +169,47 @@ class Music(commands.Cog):
             client_id=data["client_id"],
             client_secret=data["client_secret"]
         )
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+        """Ran when a member updates their voice state
+        
+        This is part of a temporary fix for issues regarding the bot leaving voice unexpectedly due to an error while playing music.
+        All this does is check if the bot was *supposed* to leave voice, otherwise cleanup any leftover voice data and reconnect
+        """
+
+        if member.id != self.bot.user.id:
+            return
+
+        if before.channel and not after.channel:
+            guild: discord.Guild = before.channel.guild
+            
+            self.logger.info(f"DungeonWhisperer disconnected from voice channel {before.channel.id}, guild {guild.id}")
+            
+
+            if guild.id not in self.proper_disconnects and isinstance(before.channel, discord.VoiceChannel):
+                # NOTE: THIS WILL BREAK WHEN WE MOVE TO MAKING THIS UTILIZE A STAGE CHANNEL
+                self.logger.warn(f"Improper disconnect for guild {guild.id}. Attempting to re-establish voice connection...")
+
+                try:
+                    voice = await before.channel.connect()
+                except discord.HTTPException as err:
+                    # :shrug:
+                    self.logger.exception(f"Failed to re-establish voice connection for guild {guild.id}: {err}")
+                else:
+                    # because of how self._play_track() works, we have to pass an invokation context into
+                    # the method, which is normally called from within an actual command
+                    # instead, we'll fetch the context based from the guild's radio message, if able
+                    # if there's no radio message then I guess sucks to be that guild :shrug:
+                    # TODO: Fix this nonsense
+                    message: Optional[discord.Message] = await self.retrieve_radio_message(guild)
+                    if message:
+                        ctx = await self.bot.get_context(message)
+
+                        # THIS DOES NOT CONTAIN ERROR CHECKING!!!
+                        self._play_track(ctx, voice, self.get_next_track())
+            else:
+                self.proper_disconnects.remove(guild.id)
 
     def get_spotify_album(self, album_url: str) -> dict:
         """Returns a `dict` representing raw album data from Spotify
@@ -586,6 +612,7 @@ class Music(commands.Cog):
                 value=reason if reason else "Check below to see if there is any news on why the bot is not playing music"
             )
 
+            self.proper_disconnects.append(ctx.guild.id)
             await voice_client.disconnect()
             await self.modify_radio_message(ctx, embed=embed)
         
