@@ -68,7 +68,7 @@ class Embeds(commands.Cog):
     @commands.command(name="copy")
     async def copy_command(self, ctx: Context, source_message: discord.Message, out_channel: Optional[discord.TextChannel]):
         """
-        Copy's a message and sends it in another channel
+        Copies a message and sends it in another channel
         """
 
         if not out_channel:
