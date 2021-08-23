@@ -196,8 +196,6 @@ class Embeds(commands.Cog):
                 filename=filename
             )
         )
-        
-
 
 
 def setup(bot: DiscordBot):
