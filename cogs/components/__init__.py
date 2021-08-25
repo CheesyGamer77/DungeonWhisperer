@@ -1,3 +1,4 @@
+import base64
 from dislash import ActionRow, Button, Component, MessageInteraction, SelectMenu, SelectOption
 import discord
 import io
@@ -7,7 +8,9 @@ from cheesyutils.discord_bots import DiscordBot, Context, Embed, is_guild_modera
 from cheesyutils.discord_bots.types import NameConvertibleEnum
 from discord.ext import commands
 from enum import Enum
-from typing import Any, Callable, Generator, List, Optional, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Union
+from .actions import ActionEnvironment
+
 
 class ComponentType(Enum):
     # yes, dislash has a class for this, but the author
@@ -19,131 +22,12 @@ class ComponentType(Enum):
     SelectMenu = 3
 
 
-class ConversionFailed(commands.BadArgument):
-    def __init__(self, argument: str, message: str=None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.argument = argument
-        self.message = message
-
-
-class RoleGroupNotFound(ConversionFailed):
-    pass
-
-
-class RoleGroup:
-    def __init__(self, name: str, roles: List[discord.Role]):
-        self.name = name
-        self.roles = roles
-
-    @classmethod
-    async def fetch(cls, bot: DiscordBot, guild: discord.Guild, name: str) -> "RoleGroup":
-        """Fetches a role group given a guild and a group name
-
-        This differs from `convert` as it doesn't require a context, but requires a `DiscordBot`
-
-        Parameters
-        ----------
-        bot : DiscordBot
-            The bot to execute the database query on
-        guild : discord.Guild
-            The guild to fetch the role group for
-        name : str
-            The group name to fetch
-
-        Raises
-        ------
-        `RoleGroupNotFound` if the group does not exist
-
-        Returns
-        -------
-        The respective role group, if able
-        """
-
-        rows = await bot.database.query_all(
-            "SELECT * FROM role_groups WHERE server_id = ? AND name = ?",
-            parameters=(guild.id, name)
-        )
-
-        if rows:
-            roles: List[discord.Role] = []
-            for row in rows:
-                try:
-                    role: Optional[discord.Role] = guild.get_role(row["role_id"])
-                    if role:
-                        roles.append(role)
-                except KeyError:
-                    # logger.error("Could not retrieve role id for role group %s of guild %s. Did the database schema change?", name, guild.id)
-                    pass
-
-            return cls(name, roles)
-        
-        raise RoleGroupNotFound(name)
-
-    @classmethod
-    async def convert(cls, ctx: Context, argument: str) -> "RoleGroup":
-        """Converts the given argument into a valid role group
-        
-        Parameters
-        ----------
-        ctx : Context
-            The invokation context
-        argument : str
-            The argument to convert to a role group
-        
-        Raises
-        ------
-        `RoleGroupNotFound` if the group does not exist
-
-        Returns
-        -------
-        The respective role group, if able
-        """
-
-        rows = await ctx.bot.database.query_all(
-            "SELECT * FROM role_groups WHERE server_id = ? AND name = ?",
-            parameters=(ctx.guild.id, argument)
-        )
-
-        if rows:
-            roles: List[discord.Role] = []
-            for row in rows:
-                try:
-                    role: Optional[discord.Role] = ctx.guild.get_role(row["role_id"])
-                    if role:
-                        roles.append(role)
-                except KeyError:
-                    # logger.error("Could not retrieve role id for role group %s of guild %s. Did the database schema change?", argument, ctx.guild.id)
-                    pass
-
-            return cls(argument, roles)
-        
-        raise RoleGroupNotFound(argument)
-
-
-class MenuEvent(NameConvertibleEnum):
-    on_select = 0
-    on_unselect = 1
-
-
 class ButtonType(NameConvertibleEnum):
     primary = 1
     secondary = 2
     success = 3
     danger = 4
     link = 5
-
-
-class ComponentAction(NameConvertibleEnum):
-    add_role = 0  # add a role to the user
-    remove_role = 1  # remove a role from the user
-    send_message = 2  # send a message
-    send_followup = 3  # sends an invisible message
-    remove_role_group = 4 # removes all roles part of a particular group
-
-
-class ContentVisibility(NameConvertibleEnum):
-    hidden = 0
-    visible = 1
 
 
 class Components(commands.Cog):
@@ -280,32 +164,13 @@ class Components(commands.Cog):
                     elif isinstance(inner_component, SelectMenu) and inner_component.custom_id == component_id_or_label:
                         # this is just a select menu, which always has a
                         # custom_id, so proceed with usual updates
-                        return _do_update_inner(component, i, j, setter)
+                        return _do_update_inner(components, i, j, setter)
             elif isinstance(component, Button) and component.label == component_id_or_label:
                 return _do_update_outer(components, i, setter)
             elif isinstance(component, SelectMenu) and component.custom_id == component_id_or_label:
                 return _do_update_outer(components, i, setter)
             
         return components
-
-    """
-    def update_menu(self, components: List[Component], menu_id: str, setter: Callable[[SelectMenu], SelectMenu]) -> List[Component]:
-        for i, component in enumerate(components):
-            if isinstance(component, ActionRow):
-                # walk through the action row's components and update as well
-                for j, inner_component in enumerate(component.components):                    
-                    if isinstance(inner_component, SelectMenu) and inner_component.custom_id == menu_id:
-                        inner_component = setter(inner_component)
-                        component.components[j] = inner_component
-                        components[i] = component
-                        return components
-            elif isinstance(component, SelectMenu) and component.custom_id == menu_id:
-                component = setter(component)
-                components[i] = component
-                return components
-            
-        return components
-    """
     
     @commands.Cog.listener()
     async def on_button_click(self, interaction: MessageInteraction):
@@ -317,125 +182,51 @@ class Components(commands.Cog):
             The interaction containing the button clicked
         """
 
-        # fetch all actions
+        custom_id = interaction.component.custom_id
+        guild = interaction.guild
+        channel = interaction.channel
+        message = interaction.message
+
+        row = await self.bot.database.query_first(
+            "SELECT * FROM button_actions WHERE server_id = ? AND channel_id = ? AND message_id = ? AND button_id = ?",
+            parameters=(guild.id, channel.id, message.id, custom_id)
+        )
+
+        self.logger.debug(f"Received button click interaction on button {custom_id} from guild {guild.id}, message {message.jump_url}")
+
+        if row:
+            environment = ActionEnvironment(json.loads(row["action"]))
+            await environment.execute(interaction)
+
+    @commands.Cog.listener()
+    async def on_dropdown(self, interaction: MessageInteraction):
         custom_id = interaction.component.custom_id
         guild = interaction.guild
         channel = interaction.channel
         message = interaction.message
 
         rows = await self.bot.database.query_all(
-            "SELECT * FROM button_actions WHERE server_id = ? AND channel_id = ? AND message_id = ? AND button_id = ? ORDER BY priority ASC",
+            "SELECT * FROM menu_actions WHERE server_id = ? AND channel_id = ? AND message_id = ? AND menu_id = ?",
             parameters=(guild.id, channel.id, message.id, custom_id)
         )
 
-        self.logger.debug(f"Received button click interaction on button {custom_id} from guild {guild.id}, message {message.jump_url}")
+        key: Dict[str, ActionEnvironment] = {}
+        for row in rows:
+            row = dict(row)
+            action_data = json.loads(row["action"])
+            self.logger.debug(f"Action data is of type {type(action_data)!r}: {action_data!r}")
+            key[row["option_label"]] = ActionEnvironment(action_data)
 
-        actions: List[dict] = [json.loads(row["action"]) for row in rows]
-        self.logger.debug(f"Fetched {len(actions)} actions to execute on click for button {custom_id}")
-
-        for action in actions:
-            action_type = ComponentAction(action["type"])
-
-            if action_type is ComponentAction.send_followup:
-                self.logger.debug(f"Sending follow up message to {interaction.author.id} in guild {guild.id}, channel {channel.id}")
-
-                # extract message JSON like we do with the embeds, and send it
-                # TODO: DUPLICATE CODE!!!!!!!!!!!
-                data: dict = json.loads(action["message"])
-                
-                keys = data.keys()
-                if "version" in keys and "backups" in keys and isinstance(data["backups"], list):
-                    # this is probably discohook's alternative syntax
-
-                    # NOTE: We only look at the first backup
-                    for message in data["backups"][0]["messages"]:
-                        message = message["data"]
-                        for i, embed_json in enumerate(message["embeds"]):
-                            embed_json["type"] = "rich"
-                            await interaction.respond(
-                                message["content"] if i == 0 else None,
-                                embed=Embed.from_dict(embed_json),
-                                ephemeral=True
-                            )
-
-                elif "content" in keys and "embeds" in keys and isinstance(data["embeds"], list):
-                    # this is most likely the standard format discord expects
-                    for i, embed_json in enumerate(data["embeds"]):
-                        embed_json["type"] = "rich"
-
-                        await interaction.respond(
-                            data["content"] if i == 0 else None,
-                            embed=Embed.from_dict(embed_json),
-                            ephemeral=True
-                        )
-                else:
-                    self.logger.error(f"Undefined message action schema for message {message.jump_url} with root keys {keys}")
-
-    @commands.Cog.listener()
-    async def on_dropdown(self, interaction: MessageInteraction):
-        # fetch all actions
-        rows = await self.bot.database.query_all(
-            "SELECT * FROM menu_actions WHERE server_id = ? AND channel_id = ? AND message_id = ? AND menu_id = ? ORDER BY priority ASC",
-            parameters=(interaction.guild.id, interaction.channel.id, interaction.message.id, interaction.component.custom_id)
-        )
-
-        self.logger.debug(
-            "Received menu interaction on menu %s from guild %s, channel %s, message %s",
-            interaction.component.custom_id, interaction.guild.id, interaction.channel.id, interaction.message.id
-        )
+        self.logger.debug(f"Received menu interaction on menu {custom_id} from guild {guild.id}, channel {channel.id}, message {message.id}")
 
         for selected_option in interaction.component.selected_options:
-            # extract any on_select actions for the option
-            actions: List[dict] = [json.loads(row["action"]) for row in rows if MenuEvent(row["event"]) is MenuEvent.on_select and row["label"] == selected_option.label]
-            self.logger.debug("Found %s actions to execute on select for label %s", len(actions), selected_option.label)
-
-            # iterate through each of the selected options
-            # execute any on_event actions, if required
-            # NOTE: these iterate in order by priority
-            for select_action in actions:
-                action_type = ComponentAction(select_action["type"])
-                if action_type is ComponentAction.add_role:
-                    # check if the member doesn't already has the role
-                    role_id = select_action["role_id"]
-                    if not (role_id in [role.id for role in interaction.author.roles]):
-                        self.logger.debug("Adding role %s to user %s", role_id, interaction.author.id)
-                        await interaction.author.add_roles(discord.Object(role_id))
-                elif action_type is ComponentAction.remove_role:
-                    # check if the member currently has the role
-                    role_id = select_action["role_id"]
-                    if role_id in [role.id for role in interaction.author.roles]:
-                        self.logger.debug("Removing role %s from user %s", role_id, interaction.author.id)
-                        await interaction.author.remove_roles(discord.Object(role_id))
-
-                elif action_type is ComponentAction.send_message:
-                    # we.. really don't have any checks we can perform with this
-                    pass
-                elif action_type is ComponentAction.send_followup:
-                    # same as above. we really can't check for messages already sent
-                    pass
-                elif action_type is ComponentAction.remove_role_group:
-                    # fetch the role group and check if there's any roles to remove
-
-                    # we first fetch the group
-                    try:
-                        self.logger.debug("Fetching role group %s from guild %s", select_action["group_name"], interaction.guild.id)
-                        role_group = await RoleGroup.fetch(self.bot, interaction.guild, select_action["group_name"])
-                    except RoleGroupNotFound:
-                        self.logger.error(
-                            "Failed to fetch role group %s for guild %s",
-                            select_action["group_name"], interaction.guild.id
-                        )
-                    else:
-                        # now that we have the role group, we can
-                        # queue for the neccesary roles to be removed
-                        grouped_roles = []
-                        current_role_ids = [role.id for role in interaction.author.roles]
-                        for role in role_group.roles:
-                            if role.id in current_role_ids:
-                                grouped_roles.append(role)
-                        
-                        self.logger.debug("Removing %s roles from user %s", len(grouped_roles), interaction.author.id)
-                        await interaction.author.remove_roles(*grouped_roles)
+            label = selected_option.label
+            try:
+                environment: ActionEnvironment = key[label]
+            except KeyError:
+                self.logger.warning(f"Missing action environment key entry with key {label!r}. Ignoring actions for this option.")
+            else:
+                await environment.execute(interaction, self.bot)
 
     @commands.guild_only()
     @is_guild_moderator()
@@ -554,8 +345,6 @@ class Components(commands.Cog):
 
             return menu
             
-            
-
     @commands.guild_only()
     @is_guild_moderator()
     @selectmenu_option_group.group(name="actions", aliases=["action", "acts", "act"])
@@ -565,22 +354,7 @@ class Components(commands.Cog):
         """
 
         if ctx.invoked_subcommand is None:
-            if ctx.subcommand_passed is None:
-                await ctx.send(
-                    embed=Embed(
-                        title="Valid Option Actions/Events",
-                        description="These are all of the valid actions and events than an option can have",
-                        color=self.bot.color, 
-                    ).add_fields(
-                        "Actions", "Actions (cont.)",
-                        value="\n".join([f"• `{action.name}`" for action in ComponentAction])
-                    ).add_fields(
-                        "Events", "Events (cont.)",
-                        value="\n".join([f"• `{event.name}`" for event in MenuEvent])
-                    )
-                )
-            else:
-                await ctx.send_help(self.selectmenu_option_actions_group)
+            await ctx.send_help(self.selectmenu_option_actions_group)
     
     @commands.guild_only()
     @is_guild_moderator()
@@ -590,80 +364,30 @@ class Components(commands.Cog):
         ctx: Context,
         message: discord.Message,
         menu_id: str,
-        option_index: int,
-        event: MenuEvent,
-        action: ComponentAction,
-        order: int
+        *, option_label: str
     ):
         """
         Sets an action to a particular menu option, depending on whether the option was selected or not
         """
 
-        data = {
-            "version": 1,
-            "type": action.value
-        }
-
-        if action is ComponentAction.add_role or action is ComponentAction.remove_role:
-            # prompt for the role
-            while True:
-                try:
-                    arg = await ctx.prompt_string(Embed(description="Input the name, ID, or mention of the role you want to set"), timeout=30)
-                    role: discord.Role = await commands.RoleConverter().convert(ctx, arg)
-                    data["role_id"] = role.id
-                    break
-                except PromptTimedout as e:
-                    return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
-                except commands.RoleNotFound:
-                    await ctx.reply_fail(f"Could not convert `{arg}` into a valid role, try again")
-        elif action is ComponentAction.remove_role_group:
-            # prompt for role group name
-            while True:
-                try:
-                    arg = await ctx.prompt_string(Embed(description="Input the name of the role group you wish to remove"), timeout=30)
-                    group: RoleGroup = await RoleGroup.convert(ctx, arg)
-                    data["group_name"] = group.name
-                    break
-                except PromptTimedout as e:
-                    return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
-                except RoleGroupNotFound:
-                    await ctx.reply_fail(f"Could not convert {arg} into a valid role group, try again")
-        elif action is ComponentAction.send_followup:
-            # prompt followup message content
+        if ctx.message.attachments and ctx.message.attachments[0].filename.endswith(".json"):
+            attachment = ctx.message.attachments[0]
             try:
-                data["message"] = await ctx.prompt_string(Embed(description="Input the follow up message to send"), timeout=30)
-            except PromptTimedout as e:
-                return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
+                data: bytes = await attachment.read()
+                data: dict = json.loads(data)
 
-        # fetch the menu and its respective option
-        # this is so jank it's not even funny
-        # TODO: please clean this up
-        components = await self.fetch_all_components(message)
-        if components:
-            menus: List[SelectMenu] = list(filter(lambda c: isinstance(c, SelectMenu), self.walk_components(components)))
-            menu: SelectMenu = discord.utils.find(lambda m: m.custom_id == menu_id, menus)
-            if menu:
-                if menu.options:
-                    try:
-                        option: SelectOption = menu.options[option_index]
-                    except IndexError:
-                        return await ctx.reply_fail(f"Invalid option index supplied (must be between 0 and {len(menu.options)-1}), try again")
-                else:
-                    return await ctx.reply_fail("Menu does not contain any options")
+                await self.bot.database.execute(
+                    "INSERT INTO menu_actions VALUES (?, ?, ?, ?, ?, ?)",
+                    parameters=(ctx.guild.id, message.channel.id, message.id, menu_id, option_label, json.dumps(data, indent=0))
+                )
+
+                await ctx.reply_success("Action set")
+            except discord.HTTPException as e:
+                await ctx.reply_fail(f"Couldn't read attachment data: {e.__class__.__name__}")
+            except json.JSONDecodeError as e:
+                await ctx.reply_fail(f"Failed to decode JSON in attachment at line {e.lineno}")
             else:
-                return await ctx.reply_fail("Message does not contain a menu")
-        else:
-            return await ctx.reply_fail("Message does not contain any components")
-
-        json_data = json.dumps(data)
-
-        # add the action into the database
-        await self.bot.database.execute(
-            "INSERT INTO menu_actions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            parameters=(ctx.guild.id, message.channel.id, message.id, menu_id, option.label, json_data, order, event.value)
-        )
-
-        await ctx.send(f"Set option action `{action.name}` on event `{event.name}`", file=discord.File(io.StringIO(json_data), "action_data.json"))            
+                return data
 
     @commands.guild_only()
     @is_guild_moderator()
@@ -811,14 +535,29 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @selectmenu_option_group.command(name="reorder", aliases=["order", "setorder"])
-    async def selectmenu_option_reorder_command(self, ctx: Context, message: discord.Message, menu_id: str, *, labels_separated_by_whitespace: str):
+    async def selectmenu_option_reorder_command(self, ctx: Context, message: discord.Message, menu_id: str):
         """
-        Changes the order of a menu's options by label. The left-most specified label will be at the top, and the
-        right-most label will be at the bottom of the menu
+        Changes the order of a menu's options by label. The bot will prompt for the label of the option to set, from highest to lowest on the menu
         """
         
-        pass
+        components = await self.fetch_all_components(message)
 
+        # this is a lazy way to get the menu we want
+        menu = None
+        for component in self.walk_components(components):
+            if component.custom_id == menu_id and isinstance(component, SelectMenu):
+                menu: SelectMenu = component
+                break
+        
+        if not menu:
+            return await ctx.reply_fail(f"No menu with custom ID `{menu_id}` found on that message")
+        
+        i = 0
+        while True:
+            try:
+                index = int(await ctx.prompt_string(Embed(description=f"Input the label of the option that should be placed at index {i+1}")))
+            except ValueError:
+                await ctx.send("e")
     @commands.guild_only()
     @is_guild_moderator()
     @selectmenu_option_group.command(name="info")
@@ -1527,36 +1266,29 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @button_actions_group.command(name="set")
-    async def button_actions_set_command(self, ctx: Context, message: discord.Message, button_id: str, action: ComponentAction, order: int):
+    async def button_actions_set_command(self, ctx: Context, message: discord.Message, button_id: str):
         """
         Sets the action of a button
         """
 
-        data = {
-            "version": 1,
-            "type": action.value
-        }
+        if ctx.message.attachments and ctx.message.attachments[0].filename.endswith(".json"):
+            attachment = ctx.message.attachments[0]
+            try:
+                data: bytes = await attachment.read()
+                data: dict = json.loads(data)
 
-        if action is ComponentAction.send_followup or action is ComponentAction.send_message:
-            while True:
-                try:
-                    arg = await ctx.prompt_string(Embed(description="Input the url to the source message to use for the message data"), timeout=30)
-                    source_message = await commands.MessageConverter().convert(ctx, arg)
-                    data["message"] = json.dumps(self.get_message_json(source_message))
-                    break
-                except commands.MessageNotFound:
-                    await ctx.reply_fail("No message found")
-                except PromptTimedout as e:
-                    return await ctx.reply_fail(f"Timed out after {e.timeout} seconds, try again")
-        
-        json_data = json.dumps(data)
+                await self.bot.database.execute(
+                    "INSERT INTO button_actions VALUES (?, ?, ?, ?, ?, ?)",
+                    parameters=(ctx.guild.id, message.channel.id, message.id, button_id, json.dumps(data, indent=0))
+                )
 
-        await self.bot.database.execute(
-            "INSERT INTO button_actions VALUES (?, ?, ?, ?, ?, ?)",
-            parameters=(ctx.guild.id, message.channel.id, message.id, button_id, json_data, order)
-        )
-
-        await ctx.send(f"Set button action `{action.name}` on click", file=discord.File(io.StringIO(json_data), filename="action_data.json"))
+                await ctx.reply_success("Action set")
+            except discord.HTTPException as e:
+                await ctx.reply_fail(f"Couldn't read attachment data: {e.__class__.__name__}")
+            except json.JSONDecodeError as e:
+                await ctx.reply_fail(f"Failed to decode JSON in attachment at line {e.lineno}")
+            else:
+                return data
 
     @commands.guild_only()
     @is_guild_moderator()
