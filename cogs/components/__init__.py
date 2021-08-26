@@ -216,7 +216,6 @@ class Components(commands.Cog):
         for row in rows:
             row = dict(row)
             action_data = json.loads(row["action"])
-            self.logger.debug(f"Action data is of type {type(action_data)!r}: {action_data!r}")
             key[row["option_label"]] = ActionEnvironment(action_data)
 
         self.logger.debug(f"Received menu interaction on menu {custom_id} from guild {guild.id}, channel {channel.id}, message {message.id}")
