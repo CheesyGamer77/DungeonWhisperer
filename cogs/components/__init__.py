@@ -1122,18 +1122,20 @@ class Components(commands.Cog):
         """
 
         components = await self.fetch_all_components(message)
+
+        # extract buttons
+        buttons: List[Button] = [component for component in self.walk_components(components) if isinstance(component, Button)]
         
-        if components and any([isinstance(component, Button) for component in components]):
+        if components and buttons:
             lines: List[str] = []
 
-            for component in components:
-                if isinstance(component, Button):
-                    button_type = ButtonType(component.style)
-                    if button_type is not ButtonType.link:
-                        # non-link buttons have a custom ID
-                        lines.append(f"• ID: `{component.id}` Style: `{button_type.name.title()}`")
-                    else:
-                        lines.append(f"• [Link Button]({component.url})") 
+            for button in buttons:
+                button_type = ButtonType(button.style)
+                if button_type is not ButtonType.link:
+                    # non-link buttons have a custom ID
+                    lines.append(f"• ID: `{button.id}` Style: `{button_type.name.title()}`")
+                else:
+                    lines.append(f"• [Link Button]({button.url})") 
 
             await ctx.send(
                 embed=Embed(
