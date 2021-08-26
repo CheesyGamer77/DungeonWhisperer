@@ -157,10 +157,12 @@ class Components(commands.Cog):
             if isinstance(component, ActionRow):
                 # walk through the action row's components and update as well
                 for j, inner_component in enumerate(component.components):        
-                    if isinstance(inner_component, Button) and inner_component.label == component_id_or_label:
-                        # link buttons don't have a custom id, so update the button based off
-                        # of the button's label instead
-                        return _do_update_inner(components, i, j, setter)
+                    if isinstance(inner_component, Button):
+                        # for convenience, use custom ids primarily for non-link buttons, and use the label as a fallback
+                        if inner_component.label == component_id_or_label:
+                            return _do_update_inner(components, i, j, setter)
+                        elif ButtonType(inner_component.style) is not ButtonType.link and inner_component.custom_id == component_id_or_label:
+                            return _do_update_inner(components, i, j, setter)
                     elif isinstance(inner_component, SelectMenu) and inner_component.custom_id == component_id_or_label:
                         # this is just a select menu, which always has a
                         # custom_id, so proceed with usual updates
