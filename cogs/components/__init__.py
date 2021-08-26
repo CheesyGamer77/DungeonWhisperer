@@ -4,7 +4,7 @@ import discord
 import io
 import json
 import logging
-from cheesyutils.discord_bots import DiscordBot, Context, Embed, is_guild_moderator, PromptTimedout
+from cheesyutils.discord_bots import DiscordBot, Context, Embed, is_guild_moderator, PromptTimedout, Paginator
 from cheesyutils.discord_bots.types import NameConvertibleEnum
 from discord.ext import commands
 from enum import Enum
@@ -1097,12 +1097,36 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @button_group.command(name="info")
-    async def button_info_command(self, ctx: Context):
+    async def button_info_command(self, ctx: Context, message: discord.Message):
         """
         Returns info about buttons in a message
         """
 
-        pass
+        components = await self.fetch_all_components(message)
+        
+        if components and any([isinstance(component, Button) for component in components]):
+            lines: List[str] = []
+
+            for component in components:
+                if isinstance(component, Button):
+                    button_type = ButtonType(component.style)
+                    if button_type is not ButtonType.link:
+                        # non-link buttons have a custom ID
+                        lines.append(f"• ID: `{component.id}` Style: `{button_type.name.title()}`")
+                    else:
+                        lines.append(f"• [Link Button]({component.url})") 
+
+            await ctx.send(
+                embed=Embed(
+                    title="Button IDs",
+                    description="\n".join(lines),
+                    color=self.bot.color
+                )
+            )
+        else:
+            await ctx.reply_fail("Message does not contain any buttons")
+
+
 
     @commands.guild_only()
     @is_guild_moderator()
