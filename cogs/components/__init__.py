@@ -196,7 +196,7 @@ class Components(commands.Cog):
 
         if row:
             environment = ActionEnvironment(json.loads(row["action"]))
-            await environment.execute(interaction)
+            await environment.execute(interaction, self.bot)
 
     @commands.Cog.listener()
     async def on_dropdown(self, interaction: MessageInteraction):
@@ -1328,7 +1328,7 @@ class Components(commands.Cog):
                 data: dict = json.loads(data)
 
                 await self.bot.database.execute(
-                    "INSERT INTO button_actions VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO button_actions VALUES (?, ?, ?, ?, ?)",
                     parameters=(ctx.guild.id, message.channel.id, message.id, button_id, json.dumps(data, indent=0))
                 )
 
