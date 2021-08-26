@@ -1133,9 +1133,9 @@ class Components(commands.Cog):
                 button_type = ButtonType(button.style)
                 if button_type is not ButtonType.link:
                     # non-link buttons have a custom ID
-                    lines.append(f"• ID: `{button.id}` Style: `{button_type.name.title()}`")
+                    lines.append(f"• Label: `{button.label}` ID: `{button.id}` Style: `{button_type.name.title()}`")
                 else:
-                    lines.append(f"• [Link Button]({button.url})") 
+                    lines.append(f"• Label/Link: [{button.label}]({button.url})") 
 
             await ctx.send(
                 embed=Embed(
