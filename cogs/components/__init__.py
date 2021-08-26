@@ -1152,14 +1152,21 @@ class Components(commands.Cog):
     @commands.guild_only()
     @is_guild_moderator()
     @button_group.command(name="style")
-    async def button_style_command(self, ctx: Context):
+    async def button_style_command(self, ctx: Context, message: discord.Message, button_id: str, new_style: ButtonType):
         """
         Changes the style of a button.
 
         This can only be done for non-link buttons.
         """
 
-        pass
+        components = await self.fetch_all_components(message)
+
+        def setter(button: Button) -> Button:
+            button.style = new_style.value
+            return button
+        
+        await self.set_message_components(message, self.update_component, components, button_id, setter)
+        await ctx.reply_success("Button style updated")
 
     @commands.guild_only()
     @is_guild_moderator()
