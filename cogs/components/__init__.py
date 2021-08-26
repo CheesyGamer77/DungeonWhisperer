@@ -552,12 +552,31 @@ class Components(commands.Cog):
         if not menu:
             return await ctx.reply_fail(f"No menu with custom ID `{menu_id}` found on that message")
         
-        i = 0
-        while True:
-            try:
-                index = int(await ctx.prompt_string(Embed(description=f"Input the label of the option that should be placed at index {i+1}")))
-            except ValueError:
-                await ctx.send("e")
+        options_output: List[SelectOption] = []
+        for i in range(len(menu.options)):
+            while True:
+                label = await ctx.prompt_string(Embed(description=f"Input the label of the option that should be placed at index {i+1}"))
+
+                # find the label
+                found = False
+                for option in menu.options:
+                    if option.label == label and option.label not in [option.label for option in options_output]:
+                        options_output.append(option)
+                        found = True
+                        break
+                        
+                if not found:
+                    await ctx.reply_fail("Option not found or option was already reordered. Try again.")
+                else:
+                    break
+
+        def setter(m: SelectMenu) -> SelectMenu:
+            m.options = options_output
+            return menu
+
+        await self.set_message_components(message, self.update_component(components, menu.custom_id, setter))
+        await ctx.reply_success("Options reordered")
+
     @commands.guild_only()
     @is_guild_moderator()
     @selectmenu_option_group.command(name="info")
@@ -1126,8 +1145,6 @@ class Components(commands.Cog):
         else:
             await ctx.reply_fail("Message does not contain any buttons")
 
-
-
     @commands.guild_only()
     @is_guild_moderator()
     @button_group.command(name="remove")
@@ -1189,7 +1206,7 @@ class Components(commands.Cog):
             button.style = new_style.value
             return button
         
-        await self.set_message_components(message, self.update_component, components, button_id, setter)
+        await self.set_message_components(message, self.update_component(components, button_id, setter))
         await ctx.reply_success("Button style updated")
 
     @commands.guild_only()
