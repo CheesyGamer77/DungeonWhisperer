@@ -768,7 +768,7 @@ class Components(commands.Cog):
 
         if message:
             action = message.edit
-            content = message.content if message.content else "I'm a menu!"
+            content = message.content if message.content or message.embeds else "I'm a menu!"
             components = await self.fetch_all_components(message)
             components.append(ActionRow(menu))
         else:
@@ -1008,7 +1008,7 @@ class Components(commands.Cog):
 
         if message:
             action = message.edit
-            content = message.content if message.content else "I'm a button!"
+            content = message.content if message.content or message.embeds else "I'm a button!"
             components = await self.fetch_all_components(message)
 
             # figure out where to place the button
