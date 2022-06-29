@@ -4,7 +4,7 @@ DungeonWhisperer was a private, community-facing bot built for the official Mine
 
 ## Features
 
-DungeonWhisperer handled cosmetic role assignments and embed utilities for the moderators of the Minecraft Dungeons Discord. Development took place from December 2020 through December 2022; when I left my position as a moderator.
+DungeonWhisperer handled cosmetic role assignments and embed utilities for the moderators of the Minecraft Dungeons Discord. Development took place from December 2020 through December 2021; when I left my position as a moderator.
 
 DungeonWhisperer was among one of the first bots to embrace and utilize Buttons and Select Menu message components.
 Reactions for these interaction events were handled via the "Actions" framework that I developed for this project. "Actions" are stored as a JSON schema detailing how the bot should respond given a particular component interaction event. These schemas are stored as a database entry containing information about the component the Action should apply to.
